@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---- Virtual environment ----
+venv/
+.env/
+*.env
+
+# ---- SQLite or local DB ----
+*.db
+
+# ---- Alembic ----
+alembic/versions/*.pyc
+alembic/__pycache__/
+
+# ---- Mac system files ----
+.DS_Store
+
+# ---- Logs ----
+*.log
+
+# ---- VS Code ----
+.vscode/
+
+# ---- Python caches ----
+*.pid
+*.seed
+*.bak
+
+# ---- Node (future frontend stuff) ----
+node_modules/
+
+# ---- Compiled files ----
+*.so
+*.dll
+*.dylib

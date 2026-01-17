@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 import jwt
 from typing import Optional
-from app.config import settings
+from app.core.config import settings
+
 
 def create_access_token(sub: str):
     expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

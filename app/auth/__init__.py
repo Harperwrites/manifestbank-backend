@@ -1,8 +1,16 @@
-from passlib.context import CryptContext
-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# app/auth/__init__.py
 
-def hash_password(pw: str) -> str:
-    return pwd.hash(pw)
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+)
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd.verify(plain, hashed)
+from app.auth.deps import get_current_user
+
+__all__ = [
+    "verify_password",
+    "get_password_hash",
+    "create_access_token",
+    "get_current_user",
+]

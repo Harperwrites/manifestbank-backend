@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 # ----------------------------------------
 # Add backend folder to sys.path so Alembic can import app modules
 # ----------------------------------------
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # backend folder
-sys.path.append(BASE_DIR)
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # points to backend/
+sys.path.append(BASE_DIR)  # ensures 'app' package is found
 
 # ----------------------------------------
 # Load environment variables
@@ -32,12 +32,10 @@ config.set_main_option("sqlalchemy.url", DATABASE_URL)
 # ----------------------------------------
 # Import your models for 'autogenerate' support
 # ----------------------------------------
-from app.db.session import Base  # now this works
-# Import models so Alembic can detect them
-import app.models.user  # or from app.models.user import User
+from app.db.session import Base  # Base only, do not import engine here
+import app.models.user  # import your User model so Alembic sees it
+
 target_metadata = Base.metadata
-
-
 
 # ----------------------------------------
 # Run migrations
@@ -55,11 +53,10 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # create engine directly here
+    from sqlalchemy import create_engine
+    connectable = create_engine(DATABASE_URL, poolclass=pool.NullPool)
+
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():

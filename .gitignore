@@ -37,3 +37,4 @@ node_modules/
 *.so
 *.dll
 *.dylib
+.env

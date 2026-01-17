@@ -1,48 +1,76 @@
-# main.py
-from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy.orm import Session
-from backend.app.database import SessionLocal, engine, Base
-from backend.app.models import User, BankAccount, Transaction, ManifestGoal, LedgerEntry
-from pydantic import BaseModel
+# app/main.py
 
-# Initialize DB
-Base.metadata.create_all(bind=engine)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# FastAPI app
-app = FastAPI(title="Manifest Bank API")
+from app.routes.auth import router as auth_router
+from app.routes.accounts import router as accounts_router
+from app.routes.transactions import router as transactions_router
+from app.routes.users import router as users_router
+from app.routes.dashboard import router as dashboard_router
+from app.routes.ledger import router as ledger_router
+from app.routes import admin
+from app.routes import accounts 
+from app.db import init_db
+from app.db.init_db import init_db
+from app.routes.summary import router as summary_router
+from app.routes.scheduled import router as scheduled_router
+from app.routes.ether import router as ether_router
+from app.routes.pwa import router as pwa_router
+from app.routes.dev import router as dev_router
 
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-# --- Schemas ---
-class UserCreate(BaseModel):
-    name: str
 
-class UserRead(BaseModel):
-    id: int
-    name: str
+app = FastAPI()
 
-    class Config:
-        orm_mode = True
+init_db()
 
-# --- Routes ---
-@app.post("/users/", response_model=UserRead)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = User(name=user.name)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-@app.get("/users/", response_model=list[UserRead])
-def list_users(db: Session = Depends(get_db)):
-    return db.query(User).all()
 
 @app.get("/")
-def home():
-    return {"message": "Welcome to Manifest Bank API!"}
+def root():
+    return {"status": "ok"}
+
+
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(accounts_router)
+app.include_router(transactions_router)
+app.include_router(users_router)
+app.include_router(dashboard_router)
+app.include_router(admin.router)
+app.include_router(accounts.router)
+app.include_router(ledger_router)
+app.include_router(summary_router)
+app.include_router(scheduled_router)
+app.include_router(ether_router)
+app.include_router(pwa_router)
+app.include_router(dev_router)
+
+# Optional compatibility: POST /transfer (some earlier tests/tools used this)
+from app.routes.transactions import transfer_route as root_transfer_route  # noqa: E402
+
+app.post("/transfer")(root_transfer_route)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+def health_check():
+    return {"status": "ManifestBank backend alive"}
+
+
+@app.on_event("startup")
+async def start_scheduler():
+    from app.services.scheduler import schedule_loop
+    import asyncio
+
+    asyncio.create_task(schedule_loop())

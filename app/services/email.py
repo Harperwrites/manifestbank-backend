@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, UTC
+import logging
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def send_verification_email(to_email: str, token: str) -> bool:
     api_key = settings.RESEND_API_KEY
     sender = settings.RESEND_FROM_EMAIL
     if not api_key or not sender:
+        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
         return False
 
     base = settings.FRONTEND_BASE_URL.rstrip("/")
@@ -48,4 +52,5 @@ def send_verification_email(to_email: str, token: str) -> bool:
         res.raise_for_status()
         return True
     except Exception:
+        logger.exception("Verification email failed for %s", to_email)
         return False

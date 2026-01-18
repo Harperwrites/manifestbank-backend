@@ -91,7 +91,11 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             db.add(sync_request)
             db.commit()
     ensure_subscriber(db, user.email, source="register")
-    send_verification_email(created.email, token)
+    if not send_verification_email(created.email, token):
+        raise HTTPException(
+            status_code=502,
+            detail="Verification email failed to send. Please try again later.",
+        )
     return created
 
 @router.post("/login")
@@ -146,7 +150,11 @@ def resend_verification_email(
     token = _set_verification_token(current_user)
     db.add(current_user)
     db.commit()
-    send_verification_email(current_user.email, token)
+    if not send_verification_email(current_user.email, token):
+        raise HTTPException(
+            status_code=502,
+            detail="Verification email failed to send. Please try again later.",
+        )
     return {"status": "sent"}
 
 

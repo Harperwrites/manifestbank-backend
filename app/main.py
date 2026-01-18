@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
 
 from app.routes.auth import router as auth_router
 from app.routes.accounts import router as accounts_router
@@ -50,14 +51,18 @@ from app.routes.transactions import transfer_route as root_transfer_route  # noq
 
 app.post("/transfer")(root_transfer_route)
 
+default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]
+env_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+allow_origins = sorted(set(default_origins + env_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

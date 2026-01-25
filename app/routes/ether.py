@@ -85,6 +85,8 @@ def update_profile(
         profile.display_name = payload.display_name
     if payload.bio is not None:
         profile.bio = payload.bio
+    if payload.links is not None:
+        profile.links = payload.links
     if payload.avatar_url is not None:
         profile.avatar_url = payload.avatar_url
     if payload.is_public is not None:
@@ -681,6 +683,7 @@ def search_profiles(
                 user_id=prof.user_id,
                 display_name=display,
                 bio=prof.bio,
+                links=prof.links,
                 avatar_url=prof.avatar_url,
                 is_public=prof.is_public,
                 sync_requires_approval=prof.sync_requires_approval,
@@ -730,6 +733,7 @@ def get_profile(
                 user_id=target.user_id,
                 display_name=display,
                 bio=None,
+                links=None,
                 avatar_url=target.avatar_url,
                 is_public=target.is_public,
                 sync_requires_approval=target.sync_requires_approval,
@@ -743,6 +747,7 @@ def get_profile(
         user_id=target.user_id,
         display_name=display,
         bio=target.bio,
+        links=target.links,
         avatar_url=target.avatar_url,
         is_public=target.is_public,
         sync_requires_approval=target.sync_requires_approval,

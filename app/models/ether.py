@@ -13,6 +13,7 @@ class Profile(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
     display_name = Column(String, nullable=False)
     bio = Column(Text, nullable=True)
+    links = Column(Text, nullable=True)
     avatar_url = Column(String, nullable=True)
     is_public = Column(Boolean, default=True, nullable=False)
     sync_requires_approval = Column(Boolean, default=True, nullable=False)

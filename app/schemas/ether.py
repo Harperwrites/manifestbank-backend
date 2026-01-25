@@ -9,6 +9,7 @@ class ProfileRead(BaseModel):
     user_id: int
     display_name: str
     bio: str | None = None
+    links: str | None = None
     avatar_url: str | None = None
     is_public: bool
     sync_requires_approval: bool
@@ -22,6 +23,7 @@ class ProfileRead(BaseModel):
 class ProfileUpdate(BaseModel):
     display_name: str | None = None
     bio: str | None = None
+    links: str | None = None
     avatar_url: str | None = None
     is_public: bool | None = None
     sync_requires_approval: bool | None = None

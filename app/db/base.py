@@ -22,3 +22,4 @@ from app.models.ether import (
     EtherSyncRequest,
 )
 from app.models.pwa import PwaEvent
+from app.models.journal import JournalEntry

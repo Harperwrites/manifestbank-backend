@@ -21,6 +21,7 @@ class UserRead(BaseModel):
     is_active: bool | None = True
     welcome_bonus_claimed: bool | None = False
     email_verified: bool | None = False
+    wealth_target_usd: float | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -28,3 +29,16 @@ class UserRead(BaseModel):
 class ResetPassword(BaseModel):
     email: str
     new_password: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
+
+
+class UserWealthTargetUpdate(BaseModel):
+    wealth_target_usd: float | None = None

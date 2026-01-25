@@ -1,6 +1,6 @@
 # app/models/user.py
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -20,6 +20,7 @@ class User(Base):
     email_verified = Column(Boolean, default=False, nullable=False)
     email_verification_token = Column(String, nullable=True)
     email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
+    wealth_target_usd = Column(Float, nullable=True)
 
     # ✅ User.accounts <-> Account.owner
     accounts = relationship(

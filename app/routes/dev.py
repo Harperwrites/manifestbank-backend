@@ -133,6 +133,7 @@ def sync_all_profiles(
 
     profiles = db.query(Profile).filter(Profile.id != admin_profile.id).all()
     created = 0
+    updated = 0
     for profile in profiles:
         existing_sync = (
             db.query(EtherSyncRequest)
@@ -147,6 +148,9 @@ def sync_all_profiles(
             .first()
         )
         if existing_sync:
+            if existing_sync.status != "approved":
+                existing_sync.status = "approved"
+                updated += 1
             continue
         db.add(
             EtherSyncRequest(
@@ -157,7 +161,12 @@ def sync_all_profiles(
         )
         created += 1
 
-    if created:
+    if created or updated:
         db.commit()
 
-    return {"admin_email": admin_email, "synced": created, "total_profiles": len(profiles)}
+    return {
+        "admin_email": admin_email,
+        "synced": created,
+        "updated": updated,
+        "total_profiles": len(profiles),
+    }

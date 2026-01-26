@@ -5,7 +5,14 @@ from passlib.exc import UnknownHashError
 from datetime import datetime, timedelta, UTC
 import secrets
 
-from app.schemas.user import UserCreate, UserRead, ResetPassword, UserLogin
+from app.schemas.user import (
+    UserCreate,
+    UserRead,
+    ResetPassword,
+    UserLogin,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+)
 from pydantic import BaseModel
 from app.crud.crud_user import (
     create_user,
@@ -14,7 +21,12 @@ from app.crud.crud_user import (
     update_user_password,
 )
 from app.crud.crud_subscriber import ensure_subscriber
-from app.core.security import verify_password, create_access_token, get_current_user
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    decode_access_token,
+    get_current_user,
+)
 from app.schemas.account import AccountCreate
 from app.schemas.ledger import LedgerEntryCreate
 from app.models.account import Account
@@ -24,7 +36,12 @@ from app.crud.crud_account import create_account
 from app.crud.crud_ledger import create_ledger_entry
 from app.db.session import get_db
 from app.core.config import settings
-from app.services.email import send_verification_email
+from app.services.email import (
+    send_verification_email,
+    send_password_reset_email,
+    send_signup_alert_email,
+)
+from jose import JWTError
 
 router = APIRouter(tags=["auth"])  # no prefix
 
@@ -91,6 +108,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             db.add(sync_request)
             db.commit()
     ensure_subscriber(db, user.email, source="register")
+    if settings.SIGNUP_ALERT_EMAIL:
+        send_signup_alert_email(settings.SIGNUP_ALERT_EMAIL, created.email, created.username)
     if not send_verification_email(created.email, token):
         raise HTTPException(
             status_code=502,
@@ -209,6 +228,43 @@ def reset_password(payload: ResetPassword, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Email not found")
     update_user_password(db, user, payload.new_password)
     ensure_subscriber(db, payload.email, source="reset-password")
+    return {"status": "password updated"}
+
+
+@router.post("/password-reset/request")
+def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+    user = get_user_by_email(db, payload.email)
+    if not user:
+        return {"status": "sent"}
+    token = create_access_token(
+        {"sub": str(user.id), "purpose": "password_reset"},
+        expires_delta=timedelta(hours=settings.PASSWORD_RESET_EXPIRE_HOURS),
+    )
+    if not send_password_reset_email(user.email, token):
+        raise HTTPException(
+            status_code=502,
+            detail="Password reset email failed to send. Please try again later.",
+        )
+    ensure_subscriber(db, user.email, source="password-reset")
+    return {"status": "sent"}
+
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    try:
+        claims = decode_access_token(payload.token)
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    if claims.get("purpose") != "password_reset":
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    user_id = claims.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    update_user_password(db, user, payload.new_password)
+    ensure_subscriber(db, user.email, source="password-reset")
     return {"status": "password updated"}
 
 

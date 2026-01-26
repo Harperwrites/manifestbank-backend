@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     R2_PUBLIC_BASE_URL: str | None = None
     RESEND_API_KEY: str | None = None
     RESEND_FROM_EMAIL: str | None = None
+    SIGNUP_ALERT_EMAIL: str | None = None
     FRONTEND_BASE_URL: str = "http://localhost:3000"
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = 48
+    PASSWORD_RESET_EXPIRE_HOURS: int = 2
     DEV_SEED_SECRET: str | None = None
 
     # ✅ Backwards-compatible alias for code expecting this name

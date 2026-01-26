@@ -1,16 +1,21 @@
 # app/crud/crud_user.py
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.core.security import get_password_hash
 
 
 def get_user_by_email(db: Session, email: str):
-    return db.query(User).filter(User.email == email).first()
+    if not email:
+        return None
+    return db.query(User).filter(func.lower(User.email) == email.lower()).first()
 
 
 def get_user_by_username(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+    if not username:
+        return None
+    return db.query(User).filter(func.lower(User.username) == username.lower()).first()
 
 
 def create_user(db: Session, email: str, password: str, username: str | None = None):

@@ -430,7 +430,7 @@ def delete_post(
     post = db.query(EtherPost).filter(EtherPost.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    if post.author_profile_id != profile.id:
+    if post.author_profile_id != profile.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to delete this post")
 
     db.query(EtherLike).filter(EtherLike.post_id == post_id).delete()

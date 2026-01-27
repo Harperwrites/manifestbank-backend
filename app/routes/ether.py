@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
+import io
 
 from app.db.session import get_db
 from app.core.security import get_current_user, get_verified_user
@@ -38,12 +39,20 @@ from app.schemas.ether import (
     EtherNotificationRead,
 )
 from app.services.r2 import upload_bytes, build_key
+from app.services.moderation import moderate_image_bytes, moderate_text
 from app.core.config import settings
 
 from urllib.request import urlopen
 from urllib.parse import urlparse
 
 router = APIRouter(tags=["ether"], dependencies=[Depends(get_verified_user)])
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _ensure_safe_text(text: str | None) -> None:
+    ok, reason = moderate_text(text)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
 
 def is_admin(user) -> bool:
     return getattr(user, "role", None) == "admin"
@@ -82,10 +91,13 @@ def update_profile(
 ):
     profile = get_or_create_profile(db, current_user)
     if payload.display_name is not None:
+        _ensure_safe_text(payload.display_name)
         profile.display_name = payload.display_name
     if payload.bio is not None:
+        _ensure_safe_text(payload.bio)
         profile.bio = payload.bio
     if payload.links is not None:
+        _ensure_safe_text(payload.links)
         profile.links = payload.links
     if payload.avatar_url is not None:
         profile.avatar_url = payload.avatar_url
@@ -383,6 +395,7 @@ def create_post(
     current_user=Depends(get_current_user),
 ):
     profile = get_or_create_profile(db, current_user)
+    _ensure_safe_text(payload.content)
     post = EtherPost(
         author_profile_id=profile.id,
         kind=payload.kind,
@@ -438,6 +451,7 @@ def add_comment(
     post = db.query(EtherPost).filter(EtherPost.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
+    _ensure_safe_text(payload.content)
     comment = EtherComment(
         post_id=post.id,
         author_profile_id=profile.id,
@@ -579,6 +593,8 @@ def create_group(
 ):
     if not is_admin(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    _ensure_safe_text(payload.name)
+    _ensure_safe_text(payload.description)
     profile = get_or_create_profile(db, current_user)
     group = EtherGroup(
         name=payload.name,
@@ -763,8 +779,17 @@ def upload_avatar(
     current_user=Depends(get_current_user),
 ):
     profile = get_or_create_profile(db, current_user)
+    content_type = file.content_type or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+    payload = file.file.read()
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds 5MB limit.")
+    ok, reason = moderate_image_bytes(payload)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Image rejected.")
     key = build_key(f"avatars/{profile.id}", file.filename)
-    url = upload_bytes(file.file, key, file.content_type or "image/jpeg")
+    url = upload_bytes(io.BytesIO(payload), key, content_type)
     profile.avatar_url = url
     db.add(profile)
     db.commit()
@@ -778,8 +803,17 @@ def upload_post_image(
     current_user=Depends(get_current_user),
 ):
     profile = get_or_create_profile(db, current_user)
+    content_type = file.content_type or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+    payload = file.file.read()
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds 5MB limit.")
+    ok, reason = moderate_image_bytes(payload)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Image rejected.")
     key = build_key(f"posts/{profile.id}", file.filename)
-    url = upload_bytes(file.file, key, file.content_type or "image/jpeg")
+    url = upload_bytes(io.BytesIO(payload), key, content_type)
     return {"url": url}
 
 
@@ -1114,6 +1148,7 @@ def send_message(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a thread member")
+    _ensure_safe_text(payload.content)
     msg = EtherMessage(thread_id=thread_id, sender_profile_id=profile.id, content=payload.content)
     db.add(msg)
     db.commit()

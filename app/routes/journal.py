@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.journal import JournalEntry
 from app.schemas.journal import JournalEntryCreate, JournalEntryRead, JournalEntryUpdate
 from app.services.r2 import upload_bytes, build_key
+from app.services.moderation import moderate_image_bytes, moderate_text
 
 
 router = APIRouter(tags=["journal"])
@@ -39,6 +40,12 @@ def create_entry(
     db: Session = Depends(get_db),
     current_user=Depends(get_verified_user),
 ):
+    ok, reason = moderate_text(payload.title)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
+    ok, reason = moderate_text(payload.content)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
     entry = JournalEntry(user_id=current_user.id, **payload.model_dump())
     db.add(entry)
     db.commit()
@@ -71,6 +78,14 @@ def update_entry(
         raise HTTPException(status_code=404, detail="Entry not found")
     _ensure_owned(entry, current_user.id)
     updates = payload.model_dump(exclude_unset=True)
+    if "title" in updates:
+        ok, reason = moderate_text(updates.get("title"))
+        if not ok:
+            raise HTTPException(status_code=400, detail=reason or "Text rejected.")
+    if "content" in updates:
+        ok, reason = moderate_text(updates.get("content"))
+        if not ok:
+            raise HTTPException(status_code=400, detail=reason or "Text rejected.")
     for key, value in updates.items():
         setattr(entry, key, value)
     db.add(entry)
@@ -90,6 +105,9 @@ def upload_journal_image(
     payload = file.file.read()
     if len(payload) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds 5MB limit.")
+    ok, reason = moderate_image_bytes(payload)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Image rejected.")
     key = build_key(f"journals/{current_user.id}", file.filename or "journal.jpg")
     url = upload_bytes(io.BytesIO(payload), key, content_type)
     return {"url": url}

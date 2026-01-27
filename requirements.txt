@@ -59,3 +59,8 @@ uvicorn==0.38.0
 uvloop==0.22.1
 watchfiles==1.1.1
 websockets==15.0.1
+Pillow==10.4.0
+numpy==1.26.4
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.47.1

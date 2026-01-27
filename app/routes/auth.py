@@ -41,6 +41,7 @@ from app.services.email import (
     send_password_reset_email,
     send_signup_alert_email,
 )
+from app.services.moderation import moderate_text
 from jose import JWTError
 
 router = APIRouter(tags=["auth"])  # no prefix
@@ -58,6 +59,9 @@ def _set_verification_token(user: User) -> str:
 
 @router.post("/register", response_model=UserRead)
 def register(user: UserCreate, db: Session = Depends(get_db)):
+    ok, reason = moderate_text(user.username)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
     existing = get_user_by_email(db, user.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -203,6 +207,9 @@ def update_username(
     current_user=Depends(get_current_user),
 ):
     cleaned = payload.username.strip()
+    ok, reason = moderate_text(cleaned)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
     if not cleaned:
         raise HTTPException(status_code=400, detail="Username required")
     if current_user.username and cleaned.lower() == current_user.username.lower():

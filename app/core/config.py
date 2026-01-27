@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = 48
     PASSWORD_RESET_EXPIRE_HOURS: int = 2
     DEV_SEED_SECRET: str | None = None
+    MODERATION_MODE: str = "lite"
 
     # ✅ Backwards-compatible alias for code expecting this name
     @property

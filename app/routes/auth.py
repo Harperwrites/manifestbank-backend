@@ -276,6 +276,13 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
                 status_code=502,
                 detail="Verification email failed to send. Please try again later.",
             )
+    else:
+        if not db_user.email_verified:
+            db_user.email_verified = True
+            db_user.email_verification_token = None
+            db_user.email_verification_expires_at = None
+            db.add(db_user)
+            db.commit()
 
     access_token = create_access_token({"sub": str(db_user.id)})
     next_path = state_data.get("next") or "/dashboard"

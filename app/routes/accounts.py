@@ -36,6 +36,17 @@ def get_my_accounts(
     return list_accounts_for_user(db, current_user.id)
 
 
+@router.get("/accounts/{account_id}", response_model=AccountRead)
+def get_account_detail(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    account = get_account(db, account_id)
+    ensure_access(account, current_user)
+    return account
+
+
 @router.post("/accounts", response_model=AccountRead)
 def create_my_account(
     payload: AccountCreate,

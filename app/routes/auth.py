@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from passlib.exc import UnknownHashError
 from datetime import datetime, timedelta, UTC
 import secrets
+import re
+import httpx
 
 from app.schemas.user import (
     UserCreate,
@@ -43,9 +46,13 @@ from app.services.email import (
 )
 from app.services.moderation import moderate_text
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
-from jose import JWTError
+from jose import JWTError, jwt
 
 router = APIRouter(tags=["auth"])  # no prefix
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
 class UsernameUpdate(BaseModel):
     username: str
@@ -57,6 +64,35 @@ def _set_verification_token(user: User) -> str:
         hours=settings.EMAIL_VERIFICATION_EXPIRE_HOURS
     )
     return token
+
+def _ensure_google_config():
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET or not settings.GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured.")
+
+def _create_state(next_path: str | None) -> str:
+    payload = {
+        "next": next_path or "/dashboard",
+        "exp": datetime.now(UTC) + timedelta(minutes=10),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+def _parse_state(state: str) -> dict:
+    return jwt.decode(state, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
+def _normalize_username(text: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "", text.replace(" ", "_")).lower()
+    cleaned = cleaned[:24]
+    if len(cleaned) < 3:
+        cleaned = (cleaned + "user")[:24]
+    return cleaned or "member"
+
+def _unique_username(db: Session, base: str) -> str:
+    candidate = base
+    counter = 1
+    while get_user_by_username(db, candidate):
+        candidate = f"{base}{counter}"
+        counter += 1
+    return candidate
 
 @router.post("/register", response_model=UserRead)
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -127,6 +163,124 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             detail="Verification email failed to send. Please try again later.",
         )
     return created
+
+@router.get("/auth/google/start")
+def google_start(next: str | None = None):
+    _ensure_google_config()
+    state = _create_state(next)
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+        "prompt": "consent",
+    }
+    url = httpx.URL(GOOGLE_AUTH_URL, params=params)
+    return RedirectResponse(str(url))
+
+@router.get("/auth/google/callback")
+def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    _ensure_google_config()
+    try:
+        state_data = _parse_state(state)
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+
+    token_res = httpx.post(
+        GOOGLE_TOKEN_URL,
+        data={
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        },
+        timeout=20,
+    )
+    if token_res.status_code != 200:
+        raise HTTPException(status_code=400, detail="Google token exchange failed.")
+    token_data = token_res.json()
+    id_token = token_data.get("id_token")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="Missing id_token from Google.")
+
+    info_res = httpx.get(GOOGLE_TOKENINFO_URL, params={"id_token": id_token}, timeout=20)
+    if info_res.status_code != 200:
+        raise HTTPException(status_code=400, detail="Google token verification failed.")
+    info = info_res.json()
+    email = info.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account has no email.")
+
+    db_user = get_user_by_email(db, email)
+    if not db_user:
+        display_name = info.get("name") or email.split("@")[0]
+        base_username = _normalize_username(display_name)
+        unique_username = _unique_username(db, base_username)
+        random_password = secrets.token_urlsafe(32)
+        db_user = create_user(db, email=email, password=random_password, username=unique_username)
+        db_user.terms_accepted_at = None
+        db_user.privacy_accepted_at = None
+        db_user.terms_version = None
+        db_user.privacy_version = None
+        token = _set_verification_token(db_user)
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+
+        existing_profile = db.query(Profile).filter(Profile.user_id == db_user.id).first()
+        if not existing_profile:
+            profile = Profile(user_id=db_user.id, display_name=unique_username, is_public=True)
+            db.add(profile)
+            db.commit()
+            db.refresh(profile)
+        else:
+            profile = existing_profile
+
+        admin_user = db.query(User).filter(func.lower(User.email) == "billionairebrea@wealth.com").first()
+        if admin_user:
+            admin_profile = db.query(Profile).filter(Profile.user_id == admin_user.id).first()
+            if not admin_profile:
+                admin_profile = Profile(
+                    user_id=admin_user.id,
+                    display_name=admin_user.username or admin_user.email.split("@")[0],
+                    is_public=True,
+                )
+                db.add(admin_profile)
+                db.commit()
+                db.refresh(admin_profile)
+            existing_sync = (
+                db.query(EtherSyncRequest)
+                .filter(
+                    EtherSyncRequest.requester_profile_id == profile.id,
+                    EtherSyncRequest.target_profile_id == admin_profile.id,
+                )
+                .first()
+            )
+            if not existing_sync:
+                sync_request = EtherSyncRequest(
+                    requester_profile_id=profile.id,
+                    target_profile_id=admin_profile.id,
+                    status="approved",
+                )
+                db.add(sync_request)
+                db.commit()
+
+        ensure_subscriber(db, email, source="google_register")
+        if settings.SIGNUP_ALERT_EMAIL:
+            send_signup_alert_email(settings.SIGNUP_ALERT_EMAIL, db_user.email, db_user.username)
+        if not send_verification_email(db_user.email, token):
+            raise HTTPException(
+                status_code=502,
+                detail="Verification email failed to send. Please try again later.",
+            )
+
+    access_token = create_access_token({"sub": str(db_user.id)})
+    next_path = state_data.get("next") or "/dashboard"
+    redirect_url = f"{settings.FRONTEND_BASE_URL}/auth/google/callback?token={access_token}&next={next_path}"
+    return RedirectResponse(redirect_url)
 
 @router.post("/login")
 def login(payload: UserLogin, db: Session = Depends(get_db)):

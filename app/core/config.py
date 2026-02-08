@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str | None = None
     SIGNUP_ALERT_EMAIL: str | None = None
     FRONTEND_BASE_URL: str = "http://localhost:3000"
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = 48
     PASSWORD_RESET_EXPIRE_HOURS: int = 2
     DEV_SEED_SECRET: str | None = None

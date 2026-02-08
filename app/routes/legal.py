@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.legal.content import TERMS_HASH, PRIVACY_HASH
+from app.legal.content import TERMS_HASH, PRIVACY_HASH, TERMS_TEXT, PRIVACY_TEXT
 
 router = APIRouter(tags=["legal"])
 
@@ -33,6 +33,16 @@ def get_consent(current_user: User = Depends(get_current_user)):
         "termsCurrentVersion": TERMS_VERSION,
         "privacyCurrentVersion": PRIVACY_VERSION,
         "needsReaccept": not (terms_match and privacy_match),
+    }
+
+
+@router.get("/legal/content")
+def get_legal_content():
+    return {
+        "termsText": TERMS_TEXT,
+        "privacyText": PRIVACY_TEXT,
+        "termsHash": TERMS_HASH,
+        "privacyHash": PRIVACY_HASH,
     }
 
 

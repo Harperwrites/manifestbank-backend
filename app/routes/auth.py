@@ -69,9 +69,10 @@ def _ensure_google_config():
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET or not settings.GOOGLE_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="Google OAuth is not configured.")
 
-def _create_state(next_path: str | None) -> str:
+def _create_state(next_path: str | None, keep: str | None = None) -> str:
     payload = {
         "next": next_path or "/dashboard",
+        "keep": keep or "1",
         "exp": datetime.now(UTC) + timedelta(minutes=10),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -165,9 +166,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return created
 
 @router.get("/google/start")
-def google_start(next: str | None = None):
+def google_start(next: str | None = None, keep: str | None = None):
     _ensure_google_config()
-    state = _create_state(next)
+    state = _create_state(next, keep)
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
@@ -286,7 +287,15 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     access_token = create_access_token({"sub": str(db_user.id)})
     next_path = state_data.get("next") or "/dashboard"
-    redirect_url = f"{settings.FRONTEND_BASE_URL}/auth/google/callback?token={access_token}&next={next_path}"
+    keep = "1"
+    try:
+        keep = state_data.get("keep") or "1"
+    except Exception:
+        keep = "1"
+    redirect_url = (
+        f"{settings.FRONTEND_BASE_URL}/auth/google/callback?token={access_token}"
+        f"&next={next_path}&keep={keep}"
+    )
     return RedirectResponse(redirect_url)
 
 @router.post("/login")

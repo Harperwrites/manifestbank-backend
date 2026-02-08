@@ -36,7 +36,10 @@ def parse_month(month: str) -> tuple[datetime, datetime]:
     except ValueError:
         raise HTTPException(status_code=400, detail="month must be in YYYY-MM format")
     start = datetime(year, mon, 1, tzinfo=timezone.utc)
-    if mon == 12:
+    now = datetime.now(timezone.utc)
+    if now.year == year and now.month == mon:
+        end = now
+    elif mon == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     else:
         end = datetime(year, mon + 1, 1, tzinfo=timezone.utc)

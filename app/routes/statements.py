@@ -26,7 +26,7 @@ def ensure_access(account: Account, current_user):
         raise HTTPException(status_code=403, detail="Not allowed")
 
 
-def parse_month(month: str) -> tuple[datetime, datetime]:
+def parse_month(month: str) -> tuple[datetime, datetime, bool]:
     try:
         year_str, month_str = month.split("-")
         year = int(year_str)
@@ -37,13 +37,14 @@ def parse_month(month: str) -> tuple[datetime, datetime]:
         raise HTTPException(status_code=400, detail="month must be in YYYY-MM format")
     start = datetime(year, mon, 1, tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
-    if now.year == year and now.month == mon:
+    is_current = now.year == year and now.month == mon
+    if is_current:
         end = now
     elif mon == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     else:
         end = datetime(year, mon + 1, 1, tzinfo=timezone.utc)
-    return start, end
+    return start, end, is_current
 
 
 def format_money(value: Decimal) -> str:
@@ -112,7 +113,7 @@ def get_statements(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    start, end = parse_month(month)
+    start, end, is_current = parse_month(month)
 
     if account_id:
         account = get_account(db, account_id)
@@ -163,7 +164,7 @@ def get_statements(
             }
         )
 
-    return {
+    response = {
         "summary": {
             "startingBalance": format_money(starting_balance),
             "endingBalance": format_money(ending_balance),
@@ -173,3 +174,6 @@ def get_statements(
         },
         "entries": entries,
     }
+    if is_current:
+        response["as_of"] = end.isoformat()
+    return response

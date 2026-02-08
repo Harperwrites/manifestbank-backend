@@ -42,6 +42,7 @@ from app.services.email import (
     send_signup_alert_email,
 )
 from app.services.moderation import moderate_text
+from app.routes.legal import TERMS_VERSION, PRIVACY_VERSION
 from jose import JWTError
 
 router = APIRouter(tags=["auth"])  # no prefix
@@ -59,6 +60,8 @@ def _set_verification_token(user: User) -> str:
 
 @router.post("/register", response_model=UserRead)
 def register(user: UserCreate, db: Session = Depends(get_db)):
+    if not user.accept_terms:
+        raise HTTPException(status_code=400, detail="You must accept the Terms & Conditions and Privacy Policy.")
     ok, reason = moderate_text(user.username)
     if not ok:
         raise HTTPException(status_code=400, detail=reason or "Text rejected.")
@@ -69,6 +72,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already registered")
     created = create_user(db, user.email, user.password, user.username)
+    created.terms_accepted_at = datetime.now(UTC)
+    created.privacy_accepted_at = datetime.now(UTC)
+    created.terms_version = TERMS_VERSION
+    created.privacy_version = PRIVACY_VERSION
     token = _set_verification_token(created)
     db.add(created)
     db.commit()

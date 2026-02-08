@@ -21,6 +21,7 @@ from app.routes.pwa import router as pwa_router
 from app.routes.dev import router as dev_router
 from app.routes.journal import router as journal_router
 from app.routes.statements import router as statements_router
+from app.routes.legal import router as legal_router
 
 
 
@@ -49,6 +50,7 @@ app.include_router(pwa_router)
 app.include_router(dev_router)
 app.include_router(journal_router)
 app.include_router(statements_router)
+app.include_router(legal_router)
 
 # Optional compatibility: POST /transfer (some earlier tests/tools used this)
 from app.routes.transactions import transfer_route as root_transfer_route  # noqa: E402

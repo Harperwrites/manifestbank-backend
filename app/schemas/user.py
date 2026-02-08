@@ -6,6 +6,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     username: str
+    accept_terms: bool
 
 
 class UserLogin(BaseModel):

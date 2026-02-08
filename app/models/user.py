@@ -22,6 +22,11 @@ class User(Base):
     email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
     wealth_target_usd = Column(Float, nullable=True)
 
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    privacy_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version = Column(String, nullable=True)
+    privacy_version = Column(String, nullable=True)
+
     # ✅ User.accounts <-> Account.owner
     accounts = relationship(
         "Account",

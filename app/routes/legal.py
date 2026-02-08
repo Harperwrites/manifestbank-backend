@@ -7,11 +7,12 @@ from datetime import datetime, UTC
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
+from app.legal.content import TERMS_HASH, PRIVACY_HASH
 
 router = APIRouter(tags=["legal"])
 
-TERMS_VERSION = "2026-02-07"
-PRIVACY_VERSION = "2026-02-07"
+TERMS_VERSION = TERMS_HASH
+PRIVACY_VERSION = PRIVACY_HASH
 
 
 def ensure_user(user: User):

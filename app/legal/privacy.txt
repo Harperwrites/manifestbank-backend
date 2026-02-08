@@ -1,0 +1,68 @@
+ManifestBank™ Privacy Policy
+Effective Date: February 7, 2026
+
+1. Overview
+ManifestBank™ values transparency and respects user privacy. This Privacy Policy explains how information is collected, used, stored, and protected when you use the Platform, including The Ether™.
+
+2. Information We Collect
+Depending on usage, we may collect:
+Account information (email, username)
+User-submitted content (intentions, reflections, entries, messages)
+Usage data (feature interactions, timestamps)
+Device and technical information (IP address, browser type, operating system)
+
+3. How Information Is Used
+Information is used to:
+Operate and maintain the Platform
+Enable core features and personalization
+Improve functionality and performance
+Maintain platform safety and integrity
+Comply with legal obligations
+ManifestBank™ does not sell personal data.
+
+4. Data Storage & Security
+Data is stored using reasonable technical and organizational safeguards. However, no digital system can guarantee absolute security.
+
+5. Data Sharing
+Information may be shared:
+With service providers supporting Platform operations
+When required by law or legal process
+To protect the rights, safety, or integrity of the Platform and its users
+
+6. The Ether™ – Messaging & Community Data (Hybrid Model)
+6.1 Hybrid Retention Approach
+The Ether™ uses a hybrid data retention model:
+Some messages or interactions are retained temporarily
+Some content may be retained longer to support continuity, moderation, safety, or user experience
+Retention duration may vary by feature and system requirements
+6.2 Purpose of Processing
+Ether™ data may be processed to:
+Deliver communication and community features
+Enforce Platform rules and guidelines
+Prevent abuse or misuse
+Improve Platform functionality
+6.3 Moderation & Review
+Content may be reviewed by automated systems or authorized personnel to maintain safety, compliance, and platform integrity.
+6.4 Visibility
+Content shared in public or community-visible areas of The Ether™ may be visible to other users based on Platform settings.
+
+7. Data Retention
+Data is retained only for as long as reasonably necessary to fulfill Platform purposes, legal obligations, or safety requirements.
+
+8. User Rights
+Depending on jurisdiction, users may have rights to:
+Access personal data
+Request correction or deletion
+Withdraw consent
+Requests can be submitted through official support channels.
+
+9. Children’s Privacy
+ManifestBank™ and The Ether™ are not intended for individuals under the age of 18 (or the age of majority in their jurisdiction). The Platform does not knowingly collect personal information from minors. If such information is discovered, it will be deleted in accordance with applicable law.
+
+10. Policy Updates
+This Privacy Policy may be updated periodically. Continued use of the Platform constitutes acceptance of any changes.
+
+11. Contact
+For privacy-related inquiries or requests, contact ManifestBank™ through official communication channels.
+
+These Terms are effective as of the Effective Date listed above and apply to all users who access or use the Platform on or after that date.

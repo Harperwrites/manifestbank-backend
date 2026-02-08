@@ -42,7 +42,7 @@ from app.services.email import (
     send_signup_alert_email,
 )
 from app.services.moderation import moderate_text
-from app.routes.legal import TERMS_VERSION, PRIVACY_VERSION
+from app.legal.content import TERMS_HASH, PRIVACY_HASH
 from jose import JWTError
 
 router = APIRouter(tags=["auth"])  # no prefix
@@ -74,8 +74,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     created = create_user(db, user.email, user.password, user.username)
     created.terms_accepted_at = datetime.now(UTC)
     created.privacy_accepted_at = datetime.now(UTC)
-    created.terms_version = TERMS_VERSION
-    created.privacy_version = PRIVACY_VERSION
+    created.terms_version = TERMS_HASH
+    created.privacy_version = PRIVACY_HASH
     token = _set_verification_token(created)
     db.add(created)
     db.commit()

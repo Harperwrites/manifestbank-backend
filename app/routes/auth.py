@@ -164,7 +164,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         )
     return created
 
-@router.get("/auth/google/start")
+@router.get("/google/start")
 def google_start(next: str | None = None):
     _ensure_google_config()
     state = _create_state(next)
@@ -180,7 +180,7 @@ def google_start(next: str | None = None):
     url = httpx.URL(GOOGLE_AUTH_URL, params=params)
     return RedirectResponse(str(url))
 
-@router.get("/auth/google/callback")
+@router.get("/google/callback")
 def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     _ensure_google_config()
     try:

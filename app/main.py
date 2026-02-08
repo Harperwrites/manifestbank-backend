@@ -76,7 +76,11 @@ app.add_middleware(
 
 @app.get("/health")
 def health_check():
-    return {"status": "ManifestBank backend alive"}
+    return {
+        "status": "ManifestBank backend alive",
+        "googleAuthStart": "/auth/google/start",
+        "googleAuthCallback": "/auth/google/callback",
+    }
 
 
 @app.on_event("startup")

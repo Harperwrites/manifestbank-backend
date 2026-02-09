@@ -39,7 +39,7 @@ from app.schemas.ether import (
     EtherNotificationRead,
 )
 from app.services.r2 import upload_bytes, build_key
-from app.services.moderation import moderate_image_bytes, moderate_text
+from app.services.moderation import moderate_avatar_image_bytes, moderate_image_bytes, moderate_text
 from app.core.config import settings
 
 from urllib.request import urlopen
@@ -785,7 +785,7 @@ def upload_avatar(
     payload = file.file.read()
     if len(payload) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds 5MB limit.")
-    ok, reason = moderate_image_bytes(payload)
+    ok, reason = moderate_avatar_image_bytes(payload)
     if not ok:
         raise HTTPException(status_code=400, detail=reason or "Image rejected.")
     key = build_key(f"avatars/{profile.id}", file.filename)

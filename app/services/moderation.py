@@ -45,6 +45,7 @@ TEXT_UNSAFE_LABELS: Tuple[str, ...] = (
 )
 TEXT_MAX_LENGTH = 2000
 LITE_SKIN_THRESHOLD = 0.38
+AVATAR_SKIN_THRESHOLD = 0.62
 LITE_MAX_IMAGE_SIZE = 8 * 1024 * 1024
 LITE_WORD_BLOCKLIST: Tuple[str, ...] = (
     "gun",
@@ -115,7 +116,7 @@ def _score_image(image: Image.Image, labels: Iterable[str]) -> list[float]:
     return probs.tolist()
 
 
-def _moderate_image_lite(payload: bytes) -> tuple[bool, str | None]:
+def _moderate_image_lite(payload: bytes, skin_threshold: float = LITE_SKIN_THRESHOLD) -> tuple[bool, str | None]:
     if len(payload) > LITE_MAX_IMAGE_SIZE:
         return False, "Image rejected: file is too large."
     try:
@@ -141,7 +142,7 @@ def _moderate_image_lite(payload: bytes) -> tuple[bool, str | None]:
         & (cb < 135)
     )
     skin_ratio = float(skin_mask.mean()) if skin_mask.size else 0.0
-    if skin_ratio >= LITE_SKIN_THRESHOLD:
+    if skin_ratio >= skin_threshold:
         return False, "Image rejected for unsafe content."
     return True, None
 
@@ -170,6 +171,14 @@ def moderate_image_bytes(payload: bytes) -> tuple[bool, str | None]:
         return True, None
     if MODERATION_MODE == "lite":
         return _moderate_image_lite(payload)
+    return _moderate_image_full(payload)
+
+
+def moderate_avatar_image_bytes(payload: bytes) -> tuple[bool, str | None]:
+    if MODERATION_MODE == "off":
+        return True, None
+    if MODERATION_MODE == "lite":
+        return _moderate_image_lite(payload, skin_threshold=AVATAR_SKIN_THRESHOLD)
     return _moderate_image_full(payload)
 
 

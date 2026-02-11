@@ -46,6 +46,7 @@ from app.services.email import (
 )
 from app.services.moderation import moderate_text
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
+from app.services.ether_welcome import ensure_welcome_message
 from jose import JWTError, jwt
 
 router = APIRouter(tags=["auth"])  # no prefix
@@ -155,6 +156,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             )
             db.add(sync_request)
             db.commit()
+    ensure_welcome_message(db, profile)
     ensure_subscriber(db, user.email, source="register")
     if settings.SIGNUP_ALERT_EMAIL:
         send_signup_alert_email(settings.SIGNUP_ALERT_EMAIL, created.email, created.username)
@@ -277,6 +279,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
                 status_code=502,
                 detail="Verification email failed to send. Please try again later.",
             )
+        ensure_welcome_message(db, profile)
     else:
         if not db_user.email_verified:
             db_user.email_verified = True

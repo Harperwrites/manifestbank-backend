@@ -142,6 +142,7 @@ class EtherThreadMember(Base):
     thread_id = Column(Integer, ForeignKey("ether_threads.id"), nullable=False, index=True)
     profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("thread_id", "profile_id", name="uq_ether_thread_member"),

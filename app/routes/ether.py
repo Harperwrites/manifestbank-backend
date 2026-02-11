@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
+from datetime import datetime
 import io
 
 from app.db.session import get_db
@@ -47,6 +48,29 @@ from urllib.parse import urlparse
 
 router = APIRouter(tags=["ether"], dependencies=[Depends(get_verified_user)])
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _find_direct_thread_ids(db: Session, profile_a_id: int, profile_b_id: int) -> list[int]:
+    member_counts = (
+        db.query(
+            EtherThreadMember.thread_id.label("thread_id"),
+            func.count(EtherThreadMember.profile_id).label("member_count"),
+        )
+        .group_by(EtherThreadMember.thread_id)
+        .subquery()
+    )
+    threads = (
+        db.query(EtherThreadMember.thread_id)
+        .join(member_counts, member_counts.c.thread_id == EtherThreadMember.thread_id)
+        .filter(
+            EtherThreadMember.profile_id.in_([profile_a_id, profile_b_id]),
+            member_counts.c.member_count == 2,
+        )
+        .group_by(EtherThreadMember.thread_id)
+        .having(func.count(EtherThreadMember.profile_id) == 2)
+        .all()
+    )
+    return [row.thread_id for row in threads]
 
 
 def _ensure_safe_text(text: str | None) -> None:
@@ -1098,14 +1122,41 @@ def create_thread(
     profile = get_or_create_profile(db, current_user)
     if profile.id not in payload.participant_profile_ids:
         payload.participant_profile_ids.append(profile.id)
+    participants = list(set(payload.participant_profile_ids))
+    if len(participants) == 2:
+        existing_ids = _find_direct_thread_ids(db, participants[0], participants[1])
+        if existing_ids:
+            threads = db.query(EtherThread).filter(EtherThread.id.in_(existing_ids)).all()
+            canonical = sorted(threads, key=lambda t: t.created_at or datetime.min)[0]
+            extras = [t for t in threads if t.id != canonical.id]
+            if extras:
+                extra_ids = [t.id for t in extras]
+                db.query(EtherMessage).filter(EtherMessage.thread_id.in_(extra_ids)).update(
+                    {EtherMessage.thread_id: canonical.id}, synchronize_session=False
+                )
+                db.query(EtherThreadMember).filter(EtherThreadMember.thread_id.in_(extra_ids)).delete(
+                    synchronize_session=False
+                )
+                db.query(EtherThread).filter(EtherThread.id.in_(extra_ids)).delete(synchronize_session=False)
+                db.commit()
+            member = (
+                db.query(EtherThreadMember)
+                .filter(EtherThreadMember.thread_id == canonical.id, EtherThreadMember.profile_id == profile.id)
+                .first()
+            )
+            if member and member.deleted_at:
+                member.deleted_at = None
+                db.add(member)
+                db.commit()
+            return EtherThreadRead(id=canonical.id, created_at=canonical.created_at, participants=participants)
     thread = EtherThread()
     db.add(thread)
     db.commit()
     db.refresh(thread)
-    for pid in set(payload.participant_profile_ids):
+    for pid in participants:
         db.add(EtherThreadMember(thread_id=thread.id, profile_id=pid))
     db.commit()
-    return EtherThreadRead(id=thread.id, created_at=thread.created_at, participants=list(set(payload.participant_profile_ids)))
+    return EtherThreadRead(id=thread.id, created_at=thread.created_at, participants=participants)
 
 
 @router.get("/ether/threads", response_model=list[EtherThreadRead])
@@ -1122,6 +1173,7 @@ def list_threads(
     ]
     threads = db.query(EtherThread).filter(EtherThread.id.in_(thread_ids)).all() if thread_ids else []
     result = []
+    participant_cache: dict[int, list[int]] = {}
     for thread in threads:
         participants = [
             row.profile_id
@@ -1129,6 +1181,32 @@ def list_threads(
             .filter(EtherThreadMember.thread_id == thread.id)
             .all()
         ]
+        participant_cache[thread.id] = participants
+    pair_map: dict[tuple[int, int], list[EtherThread]] = {}
+    for thread in threads:
+        participants = participant_cache.get(thread.id, [])
+        if len(participants) == 2:
+            key = tuple(sorted(participants))
+            pair_map.setdefault(key, []).append(thread)
+    for items in pair_map.values():
+        if len(items) <= 1:
+            continue
+        canonical = sorted(items, key=lambda t: t.created_at or datetime.min)[0]
+        extra_ids = [t.id for t in items if t.id != canonical.id]
+        if extra_ids:
+            db.query(EtherMessage).filter(EtherMessage.thread_id.in_(extra_ids)).update(
+                {EtherMessage.thread_id: canonical.id}, synchronize_session=False
+            )
+            db.query(EtherThreadMember).filter(EtherThreadMember.thread_id.in_(extra_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(EtherThread).filter(EtherThread.id.in_(extra_ids)).delete(synchronize_session=False)
+            db.commit()
+            for extra_id in extra_ids:
+                participant_cache.pop(extra_id, None)
+            threads = [t for t in threads if t.id not in extra_ids]
+    for thread in threads:
+        participants = participant_cache.get(thread.id, [])
         result.append(EtherThreadRead(id=thread.id, created_at=thread.created_at, participants=participants))
     return result
 
@@ -1148,6 +1226,10 @@ def send_message(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a thread member")
+    if member.deleted_at:
+        member.deleted_at = None
+        db.add(member)
+        db.commit()
     _ensure_safe_text(payload.content)
     msg = EtherMessage(thread_id=thread_id, sender_profile_id=profile.id, content=payload.content)
     db.add(msg)
@@ -1170,9 +1252,27 @@ def list_messages(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a thread member")
-    return (
-        db.query(EtherMessage)
-        .filter(EtherMessage.thread_id == thread_id)
-        .order_by(EtherMessage.created_at.asc())
-        .all()
+    query = db.query(EtherMessage).filter(EtherMessage.thread_id == thread_id)
+    if member.deleted_at:
+        query = query.filter(EtherMessage.created_at > member.deleted_at)
+    return query.order_by(EtherMessage.created_at.asc()).all()
+
+
+@router.post("/ether/threads/{thread_id}/clear")
+def clear_thread(
+    thread_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    profile = get_or_create_profile(db, current_user)
+    member = (
+        db.query(EtherThreadMember)
+        .filter(EtherThreadMember.thread_id == thread_id, EtherThreadMember.profile_id == profile.id)
+        .first()
     )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a thread member")
+    member.deleted_at = func.now()
+    db.add(member)
+    db.commit()
+    return {"status": "cleared"}

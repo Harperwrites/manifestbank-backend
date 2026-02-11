@@ -39,3 +39,9 @@ class User(Base):
         back_populates="owner",
         cascade="all, delete-orphan",
     )
+
+    affirmations = relationship(
+        "AffirmationEntry",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )

@@ -23,3 +23,4 @@ from app.models.ether import (
 )
 from app.models.pwa import PwaEvent
 from app.models.journal import JournalEntry
+from app.models.affirmation import AffirmationEntry

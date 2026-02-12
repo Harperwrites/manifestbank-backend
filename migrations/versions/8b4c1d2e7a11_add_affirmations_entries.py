@@ -30,7 +30,11 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
-    op.create_index("ix_affirmation_entries_user_id", "affirmation_entries", ["user_id"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("affirmation_entries")}
+    if "ix_affirmation_entries_user_id" not in existing_indexes:
+        op.create_index("ix_affirmation_entries_user_id", "affirmation_entries", ["user_id"])
 
 
 def downgrade() -> None:

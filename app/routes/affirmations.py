@@ -98,6 +98,21 @@ def update_entry(
     return entry
 
 
+@router.delete("/affirmations/{entry_id}")
+def delete_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_verified_user),
+):
+    entry = db.query(AffirmationEntry).filter(AffirmationEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    _ensure_owned(entry, current_user.id)
+    db.delete(entry)
+    db.commit()
+    return {"status": "deleted"}
+
+
 @router.post("/affirmations/upload-image")
 def upload_affirmation_image(
     file: UploadFile = File(...),

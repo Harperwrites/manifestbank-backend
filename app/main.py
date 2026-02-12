@@ -21,6 +21,7 @@ from app.routes.pwa import router as pwa_router
 from app.routes.dev import router as dev_router
 from app.routes.journal import router as journal_router
 from app.routes.affirmations import router as affirmations_router
+from app.routes.contact import router as contact_router
 from app.routes.statements import router as statements_router
 from app.routes.legal import router as legal_router
 
@@ -51,6 +52,7 @@ app.include_router(pwa_router)
 app.include_router(dev_router)
 app.include_router(journal_router)
 app.include_router(affirmations_router)
+app.include_router(contact_router)
 app.include_router(statements_router)
 app.include_router(legal_router)
 

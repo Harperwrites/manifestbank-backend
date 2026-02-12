@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str | None = None
     RESEND_FROM_EMAIL: str | None = None
     SIGNUP_ALERT_EMAIL: str | None = None
+    CONTACT_FORWARD_EMAIL: str | None = None
     FRONTEND_BASE_URL: str = "http://localhost:3000"
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None

@@ -306,7 +306,24 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     identifier = (payload.identifier or payload.email or "").strip()
     if not identifier:
         raise HTTPException(status_code=400, detail="Email or username required")
-    db_user = get_user_by_email(db, identifier) or get_user_by_username(db, identifier)
+    db_user = get_user_by_email(db, identifier)
+    if not db_user:
+        # Prefer active, verified users with a real email when usernames collide (case-insensitive).
+        cleaned = identifier.strip()
+        if cleaned:
+            db_user = (
+                db.query(User)
+                .filter(func.lower(User.username) == cleaned.lower())
+                .order_by(
+                    User.email.is_not(None).desc(),
+                    User.email_verified.desc(),
+                    User.is_active.desc(),
+                    User.id.asc(),
+                )
+                .first()
+            )
+    if not db_user:
+        db_user = get_user_by_username(db, identifier)
     if not db_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 

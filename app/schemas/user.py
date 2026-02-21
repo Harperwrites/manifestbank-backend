@@ -23,6 +23,7 @@ class UserRead(BaseModel):
     welcome_bonus_claimed: bool | None = False
     email_verified: bool | None = False
     wealth_target_usd: float | None = None
+    is_premium: bool | None = False
 
     model_config = ConfigDict(from_attributes=True)
 

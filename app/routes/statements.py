@@ -11,6 +11,7 @@ from app.core.security import get_current_user
 from app.models.ledger import LedgerEntry
 from app.models.account import Account
 from app.crud.crud_account import get_account, list_accounts_for_user
+from app.services.tier import is_premium, TIER_NAME
 
 router = APIRouter(tags=["statements"])
 
@@ -113,6 +114,11 @@ def get_statements(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if not is_premium(current_user):
+        raise HTTPException(
+            status_code=402,
+            detail=f"Statements are available on {TIER_NAME}. Upgrade to unlock statements.",
+        )
     start, end, is_current = parse_month(month)
 
     if account_id:

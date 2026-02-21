@@ -14,6 +14,13 @@ from app.schemas.affirmation import (
 )
 from app.services.r2 import upload_bytes, build_key
 from app.services.moderation import moderate_image_bytes, moderate_text
+from app.services.tier import (
+    is_premium,
+    count_affirmations,
+    FREE_AFFIRMATION_LIMIT,
+    TIER_NAME,
+    SAVED_AFFIRMATION_TITLE,
+)
 
 
 router = APIRouter(tags=["affirmations"])
@@ -44,6 +51,17 @@ def create_entry(
     db: Session = Depends(get_db),
     current_user=Depends(get_verified_user),
 ):
+    if payload.title == SAVED_AFFIRMATION_TITLE and not is_premium(current_user):
+        raise HTTPException(
+            status_code=402,
+            detail=f"Saved affirmations are available on {TIER_NAME}. Upgrade to save affirmations.",
+        )
+    if not is_premium(current_user):
+        if count_affirmations(db, current_user.id) >= FREE_AFFIRMATION_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Free tier allows 10 affirmation entries. Upgrade to {TIER_NAME} for unlimited entries.",
+            )
     ok, reason = moderate_text(payload.title)
     if not ok:
         raise HTTPException(status_code=400, detail=reason or "Text rejected.")

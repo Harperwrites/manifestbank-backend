@@ -21,6 +21,7 @@ class User(Base):
     email_verification_token = Column(String, nullable=True)
     email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
     wealth_target_usd = Column(Float, nullable=True)
+    is_premium = Column(Boolean, default=False, nullable=False)
 
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     privacy_accepted_at = Column(DateTime(timezone=True), nullable=True)

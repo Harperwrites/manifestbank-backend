@@ -13,6 +13,7 @@ from app.crud.crud_account import (
     update_account_name,
     delete_account,
 )
+from app.services.tier import is_premium, count_accounts, FREE_ACCOUNT_LIMIT, TIER_NAME
 
 router = APIRouter(tags=["accounts"])
 
@@ -53,6 +54,12 @@ def create_my_account(
     db: Session = Depends(get_db),
     current_user=Depends(get_verified_user),
 ):
+    if not is_premium(current_user):
+        if count_accounts(db, current_user.id) >= FREE_ACCOUNT_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Upgrade to {TIER_NAME} to add more than 1 account.",
+            )
     if payload.parent_account_id:
         parent = get_account(db, payload.parent_account_id)
         if not parent:

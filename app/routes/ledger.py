@@ -9,6 +9,14 @@ from app.core.security import get_current_user, get_verified_user
 from app.schemas.ledger import LedgerEntryCreate, LedgerEntryRead, BalanceRead, TransferCreate
 from app.crud.crud_ledger import create_ledger_entry, list_ledger_entries, get_account_balance, create_transfer
 from app.crud.crud_account import get_account
+from app.services.tier import (
+    is_premium,
+    count_free_transactions,
+    count_checks_7d,
+    FREE_TXN_LIMIT_7D,
+    FREE_CHECK_LIMIT_7D,
+    TIER_NAME,
+)
 
 router = APIRouter(tags=["ledger"])
 
@@ -29,6 +37,23 @@ def post_entry(
 
     if (acct.owner_user_id != current_user.id) and (not is_admin(current_user)):
         raise HTTPException(status_code=403, detail="Not allowed")
+
+    if not is_premium(current_user):
+        entry_type = (payload.entry_type or "").lower()
+        meta = payload.meta or {}
+        kind = str(meta.get("kind") or "").lower()
+        if kind == "check":
+            if count_checks_7d(db, current_user.id) >= FREE_CHECK_LIMIT_7D:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Free tier allows 1 check every 7 days. Upgrade to {TIER_NAME} for unlimited checks.",
+                )
+        elif entry_type in ["deposit", "withdrawal"]:
+            if count_free_transactions(db, current_user.id) >= FREE_TXN_LIMIT_7D:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used your 5 free transactions this week. Upgrade to {TIER_NAME} for unlimited deposits/expenses.",
+                )
 
     return create_ledger_entry(db, current_user.id, payload)
 

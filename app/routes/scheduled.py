@@ -8,6 +8,7 @@ from app.core.security import get_current_user, get_verified_user
 from app.schemas.scheduled_entry import ScheduledEntryCreate, ScheduledEntryRead
 from app.crud.crud_scheduled_entry import create_scheduled_entry, list_scheduled_entries
 from app.crud.crud_account import get_account
+from app.services.tier import is_premium, count_scheduled_7d, FREE_SCHEDULE_LIMIT_7D, TIER_NAME
 
 router = APIRouter(tags=["scheduled"])
 
@@ -31,6 +32,12 @@ def create_scheduled(
 ):
     account = get_account(db, payload.account_id)
     ensure_access(account, current_user)
+    if not is_premium(current_user):
+        if count_scheduled_7d(db, current_user.id) >= FREE_SCHEDULE_LIMIT_7D:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Free tier allows 3 scheduled movements per 7 days. Upgrade to {TIER_NAME} for unlimited scheduling.",
+            )
     return create_scheduled_entry(db, current_user.id, payload)
 
 

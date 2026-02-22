@@ -22,6 +22,13 @@ class User(Base):
     email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
     wealth_target_usd = Column(Float, nullable=True)
     is_premium = Column(Boolean, default=False, nullable=False)
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, index=True)
+    stripe_price_id = Column(String, nullable=True)
+    stripe_status = Column(String, nullable=True)
+    stripe_current_period_end = Column(DateTime(timezone=True), nullable=True)
+    stripe_trial_end = Column(DateTime(timezone=True), nullable=True)
+    stripe_cancel_at_period_end = Column(Boolean, default=False, nullable=False)
 
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     privacy_accepted_at = Column(DateTime(timezone=True), nullable=True)

@@ -24,6 +24,13 @@ class UserRead(BaseModel):
     email_verified: bool | None = False
     wealth_target_usd: float | None = None
     is_premium: bool | None = False
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    stripe_price_id: str | None = None
+    stripe_status: str | None = None
+    stripe_current_period_end: str | None = None
+    stripe_trial_end: str | None = None
+    stripe_cancel_at_period_end: bool | None = False
 
     model_config = ConfigDict(from_attributes=True)
 

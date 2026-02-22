@@ -61,3 +61,4 @@ watchfiles==1.1.1
 websockets==15.0.1
 Pillow==10.4.0
 numpy==1.26.4
+stripe==10.12.0

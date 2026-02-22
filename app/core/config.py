@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     SIGNUP_ALERT_EMAIL: str | None = None
     CONTACT_FORWARD_EMAIL: str | None = None
     FRONTEND_BASE_URL: str = "http://localhost:3000"
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_PRICE_MONTHLY: str | None = None
+    STRIPE_PRICE_ANNUAL: str | None = None
+    STRIPE_SUCCESS_URL: str | None = None
+    STRIPE_CANCEL_URL: str | None = None
+    STRIPE_PORTAL_RETURN_URL: str | None = None
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str | None = None

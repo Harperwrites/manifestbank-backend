@@ -36,7 +36,7 @@ def _since_7d() -> datetime:
 def count_deposits_7d(db: Session, user_id: int) -> int:
     since = _since_7d()
     # counts deposits (excluding checks)
-    kind = func.coalesce(LedgerEntry.meta["kind"].astext, "")
+    kind = func.coalesce(LedgerEntry.meta["kind"].as_string(), "")
     return (
         db.query(func.count(LedgerEntry.id))
         .filter(
@@ -53,7 +53,7 @@ def count_deposits_7d(db: Session, user_id: int) -> int:
 def count_expenses_7d(db: Session, user_id: int) -> int:
     since = _since_7d()
     # counts withdrawals (excluding checks)
-    kind = func.coalesce(LedgerEntry.meta["kind"].astext, "")
+    kind = func.coalesce(LedgerEntry.meta["kind"].as_string(), "")
     return (
         db.query(func.count(LedgerEntry.id))
         .filter(
@@ -69,7 +69,7 @@ def count_expenses_7d(db: Session, user_id: int) -> int:
 
 def count_checks_7d(db: Session, user_id: int) -> int:
     since = _since_7d()
-    kind = func.coalesce(LedgerEntry.meta["kind"].astext, "")
+    kind = func.coalesce(LedgerEntry.meta["kind"].as_string(), "")
     return (
         db.query(func.count(LedgerEntry.id))
         .filter(

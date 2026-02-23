@@ -43,9 +43,10 @@ def create_checkout_session(
         price_id = _price_for_plan(plan)
 
     if not user.stripe_customer_id:
+        display_name = user.username or user.email
         customer = stripe.Customer.create(
             email=user.email,
-            name=user.name,
+            name=display_name,
             metadata={
                 "user_id": str(user.id),
                 "username": user.username or "",

@@ -11,9 +11,11 @@ from app.crud.crud_ledger import create_ledger_entry, list_ledger_entries, get_a
 from app.crud.crud_account import get_account
 from app.services.tier import (
     is_premium,
-    count_free_transactions,
+    count_deposits_7d,
+    count_expenses_7d,
     count_checks_7d,
-    FREE_TXN_LIMIT_7D,
+    FREE_DEPOSIT_LIMIT_7D,
+    FREE_EXPENSE_LIMIT_7D,
     FREE_CHECK_LIMIT_7D,
     TIER_NAME,
 )
@@ -48,11 +50,17 @@ def post_entry(
                     status_code=402,
                     detail=f"Free tier allows 1 check every 7 days. Upgrade to {TIER_NAME} for unlimited checks.",
                 )
-        elif entry_type in ["deposit", "withdrawal"]:
-            if count_free_transactions(db, current_user.id) >= FREE_TXN_LIMIT_7D:
+        elif entry_type == "deposit":
+            if count_deposits_7d(db, current_user.id) >= FREE_DEPOSIT_LIMIT_7D:
                 raise HTTPException(
                     status_code=402,
-                    detail=f"You've used your 5 free transactions this week. Upgrade to {TIER_NAME} for unlimited deposits/expenses.",
+                    detail=f"Free tier allows 2 deposits every 7 days. Upgrade to {TIER_NAME} for unlimited deposits.",
+                )
+        elif entry_type == "withdrawal":
+            if count_expenses_7d(db, current_user.id) >= FREE_EXPENSE_LIMIT_7D:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Free tier allows 2 expenses every 7 days. Upgrade to {TIER_NAME} for unlimited expenses.",
                 )
 
     return create_ledger_entry(db, current_user.id, payload)

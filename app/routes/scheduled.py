@@ -36,7 +36,7 @@ def create_scheduled(
         if count_scheduled_7d(db, current_user.id) >= FREE_SCHEDULE_LIMIT_7D:
             raise HTTPException(
                 status_code=402,
-                detail=f"Free tier allows 3 scheduled movements per 7 days. Upgrade to {TIER_NAME} for unlimited scheduling.",
+                detail=f"Free tier allows 1 scheduled movement per 7 days. Upgrade to {TIER_NAME} for unlimited scheduling.",
             )
     return create_scheduled_entry(db, current_user.id, payload)
 

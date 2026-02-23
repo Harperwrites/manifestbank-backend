@@ -7,6 +7,7 @@ from app.auth.deps import get_current_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
+from app.services.email import send_subscription_alert_email
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -155,9 +156,16 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if event_type == "checkout.session.completed":
         subscription_id = data.get("subscription")
         customer_id = data.get("customer")
+        payment_status = data.get("payment_status")
+        plan = (data.get("metadata") or {}).get("plan")
         if subscription_id and customer_id:
             subscription = stripe.Subscription.retrieve(subscription_id)
             update_user_from_subscription(subscription)
+            if payment_status == "paid":
+                user_obj = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+                if user_obj:
+                    to_email = settings.SUBSCRIPTION_ALERT_EMAIL or "blharper95@gmail.com"
+                    send_subscription_alert_email(to_email, user_obj.email, user_obj.username, plan)
     elif event_type in {"customer.subscription.updated", "customer.subscription.deleted"}:
         update_user_from_subscription(data)
     elif event_type in {"invoice.paid", "invoice.payment_failed"}:

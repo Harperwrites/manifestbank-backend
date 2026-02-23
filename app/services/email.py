@@ -184,3 +184,45 @@ def send_contact_email(to_email: str, name: str, email: str, subject: str, messa
     except Exception:
         logger.exception("Contact email failed for %s", email)
         return False
+
+
+def send_subscription_alert_email(to_email: str, user_email: str, username: str | None, plan: str | None) -> bool:
+    api_key = settings.RESEND_API_KEY
+    sender = settings.RESEND_FROM_EMAIL
+    if not api_key or not sender:
+        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
+        return False
+
+    display = username or user_email.split("@")[0]
+    plan_label = (plan or "annual").strip() or "annual"
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <h2 style="margin: 0 0 10px;">New ManifestBank™ Signature Member</h2>
+      <p style="margin: 0 0 6px;"><strong>Email:</strong> {user_email}</p>
+      <p style="margin: 0 0 6px;"><strong>Username:</strong> {display}</p>
+      <p style="margin: 0 0 6px;"><strong>Plan:</strong> {plan_label.title()}</p>
+      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
+        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
+      </p>
+    </div>
+    """
+
+    payload = {
+        "from": sender,
+        "to": [to_email],
+        "subject": "New ManifestBank™ Signature Member",
+        "html": html,
+    }
+
+    try:
+        res = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10,
+        )
+        res.raise_for_status()
+        return True
+    except Exception:
+        logger.exception("Subscription alert email failed for %s", to_email)
+        return False

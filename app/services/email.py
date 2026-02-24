@@ -226,3 +226,50 @@ def send_subscription_alert_email(to_email: str, user_email: str, username: str 
     except Exception:
         logger.exception("Subscription alert email failed for %s", to_email)
         return False
+
+
+def send_trial_grant_email(to_email: str, username: str | None, trial_days: int) -> bool:
+    api_key = settings.RESEND_API_KEY
+    sender = settings.RESEND_FROM_EMAIL
+    if not api_key or not sender:
+        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
+        return False
+
+    display = username or to_email.split("@")[0]
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <p style="margin: 0 0 12px;">Thank you for being a part of the ManifestBank™ community. Truly. This space exists because of you.</p>
+      <p style="margin: 0 0 12px;">We’re excited to let you know that ManifestBank™ now offers subscriptions, and as a thank-you for being an early supporter, we’ve activated something special for you.</p>
+      <p style="margin: 0 0 12px;">✨ You’ve been granted a complimentary {trial_days}-day free trial of the ManifestBank™ Signature Membership.<br/>No card required. No action needed.</p>
+      <p style="margin: 0 0 12px;">Your trial starts immediately, giving you full access to Signature features designed to deepen your intention practice, clarity, and alignment with abundance as a system, not a wish.</p>
+      <p style="margin: 0 0 12px;">This is our way of saying thank you for building with us from the beginning.</p>
+      <p style="margin: 0 0 12px;">When your {trial_days} days are complete, you’ll have the option to continue if it feels aligned. Until then, enjoy the full Signature experience on us.</p>
+      <p style="margin: 18px 0 0;">With appreciation and momentum,<br/>The ManifestBank™ Team</p>
+      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
+        ManifestBank™ is a mindset and visualization platform. It is not a financial institution.
+      </p>
+      <p style="font-size:12px;opacity:0.7;margin-top:12px;">
+        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')} • {display}
+      </p>
+    </div>
+    """
+
+    payload = {
+        "from": sender,
+        "to": [to_email],
+        "subject": f"ManifestBank™ Signature — {trial_days} days on us",
+        "html": html,
+    }
+
+    try:
+        res = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10,
+        )
+        res.raise_for_status()
+        return True
+    except Exception:
+        logger.exception("Trial grant email failed for %s", to_email)
+        return False

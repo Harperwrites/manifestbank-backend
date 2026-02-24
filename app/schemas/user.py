@@ -1,5 +1,6 @@
 # app/schemas/user.py
 
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 class UserCreate(BaseModel):
@@ -28,8 +29,8 @@ class UserRead(BaseModel):
     stripe_subscription_id: str | None = None
     stripe_price_id: str | None = None
     stripe_status: str | None = None
-    stripe_current_period_end: str | None = None
-    stripe_trial_end: str | None = None
+    stripe_current_period_end: datetime | None = None
+    stripe_trial_end: datetime | None = None
     stripe_cancel_at_period_end: bool | None = False
 
     model_config = ConfigDict(from_attributes=True)

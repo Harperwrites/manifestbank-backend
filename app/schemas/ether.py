@@ -99,6 +99,15 @@ class EtherThreadRead(BaseModel):
     participants: list[int]
 
 
+class EtherThreadPreviewRead(BaseModel):
+    id: int
+    created_at: datetime
+    participants: list[int]
+    last_message_content: str | None = None
+    last_message_at: datetime | None = None
+    last_sender_profile_id: int | None = None
+
+
 class EtherMessageCreate(BaseModel):
     content: str
 

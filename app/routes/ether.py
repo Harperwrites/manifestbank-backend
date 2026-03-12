@@ -34,6 +34,7 @@ from app.schemas.ether import (
     EtherGroupRead,
     EtherThreadCreate,
     EtherThreadRead,
+    EtherThreadPreviewRead,
     EtherMessageCreate,
     EtherMessageRead,
     EtherSyncRequestRead,
@@ -1209,6 +1210,85 @@ def list_threads(
         participants = participant_cache.get(thread.id, [])
         result.append(EtherThreadRead(id=thread.id, created_at=thread.created_at, participants=participants))
     return result
+
+
+@router.get("/ether/threads/previews", response_model=list[EtherThreadPreviewRead])
+def list_thread_previews(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    profile = get_or_create_profile(db, current_user)
+    thread_ids = [
+        row.thread_id
+        for row in db.query(EtherThreadMember.thread_id)
+        .filter(EtherThreadMember.profile_id == profile.id)
+        .all()
+    ]
+    if not thread_ids:
+        return []
+
+    threads = db.query(EtherThread).filter(EtherThread.id.in_(thread_ids)).all()
+    thread_map = {t.id: t for t in threads}
+
+    participant_rows = (
+        db.query(EtherThreadMember.thread_id, EtherThreadMember.profile_id)
+        .filter(EtherThreadMember.thread_id.in_(thread_ids))
+        .all()
+    )
+    participant_map: dict[int, list[int]] = {}
+    for thread_id, profile_id in participant_rows:
+        participant_map.setdefault(thread_id, []).append(profile_id)
+
+    member_alias = EtherThreadMember
+    latest_ids = (
+        db.query(
+            EtherMessage.thread_id.label("thread_id"),
+            func.max(EtherMessage.id).label("last_id"),
+        )
+        .join(
+            member_alias,
+            and_(
+                member_alias.thread_id == EtherMessage.thread_id,
+                member_alias.profile_id == profile.id,
+            ),
+        )
+        .filter(
+            EtherMessage.thread_id.in_(thread_ids),
+            or_(member_alias.deleted_at.is_(None), EtherMessage.created_at > member_alias.deleted_at),
+        )
+        .group_by(EtherMessage.thread_id)
+        .subquery()
+    )
+
+    last_messages = (
+        db.query(EtherMessage)
+        .join(latest_ids, EtherMessage.id == latest_ids.c.last_id)
+        .all()
+    )
+    last_map = {m.thread_id: m for m in last_messages}
+
+    previews: list[EtherThreadPreviewRead] = []
+    for thread_id in thread_ids:
+        thread = thread_map.get(thread_id)
+        if not thread:
+            continue
+        last = last_map.get(thread_id)
+        previews.append(
+            EtherThreadPreviewRead(
+                id=thread.id,
+                created_at=thread.created_at,
+                participants=participant_map.get(thread_id, []),
+                last_message_content=last.content if last else None,
+                last_message_at=last.created_at if last else None,
+                last_sender_profile_id=last.sender_profile_id if last else None,
+            )
+        )
+
+    previews.sort(
+        key=lambda p: (p.last_message_at or p.created_at),
+        reverse=True,
+    )
+    return previews
 
 
 @router.post("/ether/threads/{thread_id}/messages", response_model=EtherMessageRead)

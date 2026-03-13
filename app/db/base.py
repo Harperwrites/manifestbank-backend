@@ -24,3 +24,5 @@ from app.models.ether import (
 from app.models.pwa import PwaEvent
 from app.models.journal import JournalEntry
 from app.models.affirmation import AffirmationEntry
+from app.models.teller import TellerThread, TellerMessage, TellerAuditLog
+from app.models.credit import CreditAction, CreditActionCompletion, CreditScoreSnapshot, CreditTodo

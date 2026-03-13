@@ -10,6 +10,7 @@ from app.models.journal import JournalEntry
 from app.schemas.journal import JournalEntryCreate, JournalEntryRead, JournalEntryUpdate
 from app.services.r2 import upload_bytes, build_key
 from app.services.moderation import moderate_image_bytes, moderate_text
+from app.services.credit import record_credit_action, ensure_credit_actions
 
 
 router = APIRouter(tags=["journal"])
@@ -50,7 +51,16 @@ def create_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    ensure_credit_actions(db)
+    content = (payload.content or "").lstrip()
+    action_type = "journal_entry"
+    if content.startswith("Prompt:"):
+        action_type = "journal_prompt"
+    awarded = record_credit_action(db, current_user.id, action_type)
+    data = JournalEntryRead.model_validate(entry).model_dump()
+    data["credit_awarded"] = awarded
+    data["credit_action_type"] = action_type
+    return data
 
 
 @router.get("/journal/{entry_id}", response_model=JournalEntryRead)

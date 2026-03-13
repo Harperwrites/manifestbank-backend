@@ -14,6 +14,7 @@ from app.schemas.affirmation import (
 )
 from app.services.r2 import upload_bytes, build_key
 from app.services.moderation import moderate_image_bytes, moderate_text
+from app.services.credit import record_credit_action, ensure_credit_actions
 from app.services.tier import (
     is_premium,
     count_affirmations,
@@ -72,6 +73,8 @@ def create_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
+    ensure_credit_actions(db)
+    record_credit_action(db, current_user.id, "affirmation_save")
     return entry
 
 

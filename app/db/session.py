@@ -10,6 +10,9 @@ Base = declarative_base()
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URI,
     pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=5,
+    pool_recycle=1800,
 )
 
 SessionLocal = sessionmaker(

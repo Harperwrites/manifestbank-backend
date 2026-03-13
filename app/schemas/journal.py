@@ -29,5 +29,7 @@ class JournalEntryRead(JournalEntryBase):
     user_id: int
     created_at: datetime
     updated_at: datetime
+    credit_awarded: Optional[bool] = None
+    credit_action_type: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

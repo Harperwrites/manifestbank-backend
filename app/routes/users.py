@@ -7,6 +7,7 @@ from app.auth.deps import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import UserRead, UserWealthTargetUpdate
+from app.services.credit import record_credit_action, ensure_credit_actions
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -21,4 +22,6 @@ def update_wealth_target(
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
+    ensure_credit_actions(db)
+    record_credit_action(db, current_user.id, "wealth_target_update")
     return current_user

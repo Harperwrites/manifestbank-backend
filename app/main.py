@@ -25,6 +25,8 @@ from app.routes.contact import router as contact_router
 from app.routes.statements import router as statements_router
 from app.routes.legal import router as legal_router
 from app.routes.billing import router as billing_router
+from app.routes.teller import router as teller_router
+from app.routes.credit import router as credit_router
 
 
 
@@ -57,6 +59,8 @@ app.include_router(contact_router)
 app.include_router(statements_router)
 app.include_router(legal_router)
 app.include_router(billing_router)
+app.include_router(teller_router)
+app.include_router(credit_router)
 
 # Optional compatibility: POST /transfer (some earlier tests/tools used this)
 from app.routes.transactions import transfer_route as root_transfer_route  # noqa: E402

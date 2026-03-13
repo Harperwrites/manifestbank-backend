@@ -15,6 +15,10 @@ class UserLogin(BaseModel):
     email: str | None = None
     password: str
 
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
 class UserRead(BaseModel):
     id: int
     email: str

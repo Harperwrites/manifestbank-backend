@@ -19,6 +19,7 @@ from app.services.tier import (
     FREE_CHECK_LIMIT_7D,
     TIER_NAME,
 )
+from app.services.credit import record_credit_action, ensure_credit_actions
 
 router = APIRouter(tags=["ledger"])
 
@@ -63,7 +64,18 @@ def post_entry(
                     detail=f"Free tier allows 2 expenses every 7 days. Upgrade to {TIER_NAME} for unlimited expenses.",
                 )
 
-    return create_ledger_entry(db, current_user.id, payload)
+    entry = create_ledger_entry(db, current_user.id, payload)
+    ensure_credit_actions(db)
+    entry_type = (payload.entry_type or "").lower()
+    meta = payload.meta or {}
+    kind = str(meta.get("kind") or "").lower()
+    if kind == "check":
+        record_credit_action(db, current_user.id, "check_post")
+    elif entry_type == "deposit":
+        record_credit_action(db, current_user.id, "ledger_deposit")
+    elif entry_type == "withdrawal":
+        record_credit_action(db, current_user.id, "ledger_expense")
+    return entry
 
 
 @router.get("/accounts/{account_id}/ledger", response_model=list[LedgerEntryRead])
@@ -130,6 +142,8 @@ def transfer_funds(
         memo=payload.memo,
         reference=payload.reference,
     )
+    ensure_credit_actions(db)
+    record_credit_action(db, current_user.id, "ledger_transfer")
     return {
         "debit": LedgerEntryRead.model_validate(debit),
         "credit": LedgerEntryRead.model_validate(credit),

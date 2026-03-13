@@ -106,6 +106,9 @@ class EtherThreadPreviewRead(BaseModel):
     last_message_content: str | None = None
     last_message_at: datetime | None = None
     last_sender_profile_id: int | None = None
+    counterpart_profile_id: int | None = None
+    counterpart_display_name: str | None = None
+    counterpart_avatar_url: str | None = None
 
 
 class EtherMessageCreate(BaseModel):

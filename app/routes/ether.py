@@ -1236,8 +1236,16 @@ def list_thread_previews(
         .all()
     )
     participant_map: dict[int, list[int]] = {}
+    participant_ids: set[int] = set()
     for thread_id, profile_id in participant_rows:
         participant_map.setdefault(thread_id, []).append(profile_id)
+        participant_ids.add(profile_id)
+
+    profile_rows = db.query(Profile).filter(Profile.id.in_(participant_ids)).all()
+    user_ids = [p.user_id for p in profile_rows]
+    user_rows = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    user_map = {u.id: u for u in user_rows}
+    profile_map: dict[int, Profile] = {p.id: p for p in profile_rows}
 
     member_alias = EtherThreadMember
     latest_ids = (
@@ -1273,14 +1281,35 @@ def list_thread_previews(
         if not thread:
             continue
         last = last_map.get(thread_id)
+        participants = participant_map.get(thread_id, [])
+        counterpart_id = None
+        if participants:
+            for pid in participants:
+                if pid != profile.id:
+                    counterpart_id = pid
+                    break
+        counterpart_display_name = None
+        counterpart_avatar_url = None
+        if counterpart_id is not None:
+            prof = profile_map.get(counterpart_id)
+            user = user_map.get(prof.user_id) if prof else None
+            counterpart_display_name = (
+                (user.username if user else None)
+                or (user.email if user else None)
+                or (prof.display_name if prof else None)
+            )
+            counterpart_avatar_url = prof.avatar_url if prof else None
         previews.append(
             EtherThreadPreviewRead(
                 id=thread.id,
                 created_at=thread.created_at,
-                participants=participant_map.get(thread_id, []),
+                participants=participants,
                 last_message_content=last.content if last else None,
                 last_message_at=last.created_at if last else None,
                 last_sender_profile_id=last.sender_profile_id if last else None,
+                counterpart_profile_id=counterpart_id,
+                counterpart_display_name=counterpart_display_name,
+                counterpart_avatar_url=counterpart_avatar_url,
             )
         )
 

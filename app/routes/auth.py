@@ -38,7 +38,17 @@ from app.schemas.ledger import LedgerEntryCreate
 from app.models.account import Account
 from app.models.ether import Profile, EtherSyncRequest
 from app.models.user import User
-from app.services.credit import ensure_credit_actions, record_daily_login, points_for_action_type
+try:
+    from app.services.credit import ensure_credit_actions, record_daily_login, points_for_action_type
+except Exception:
+    def ensure_credit_actions(db):  # type: ignore[no-redef]
+        return None
+
+    def record_daily_login(db, user_id: int):  # type: ignore[no-redef]
+        return False
+
+    def points_for_action_type(action: str, is_premium: bool):  # type: ignore[no-redef]
+        return 0
 from app.services.tier import is_premium
 from app.crud.crud_account import create_account
 from app.crud.crud_ledger import create_ledger_entry

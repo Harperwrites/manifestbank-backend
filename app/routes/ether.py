@@ -1,6 +1,6 @@
 # app/routes/ether.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
 from datetime import datetime
@@ -1350,6 +1350,8 @@ def send_message(
 @router.get("/ether/threads/{thread_id}/messages", response_model=list[EtherMessageRead])
 def list_messages(
     thread_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    before: datetime | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1364,7 +1366,14 @@ def list_messages(
     query = db.query(EtherMessage).filter(EtherMessage.thread_id == thread_id)
     if member.deleted_at:
         query = query.filter(EtherMessage.created_at > member.deleted_at)
-    return query.order_by(EtherMessage.created_at.asc()).all()
+    if before is not None:
+        query = query.filter(EtherMessage.created_at < before)
+    items = (
+        query.order_by(EtherMessage.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return list(reversed(items))
 
 
 @router.post("/ether/threads/{thread_id}/clear")

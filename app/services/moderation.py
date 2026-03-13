@@ -44,6 +44,7 @@ TEXT_UNSAFE_LABELS: Tuple[str, ...] = (
     "sexual_explicit",
 )
 TEXT_MAX_LENGTH = 2000
+USERNAME_MAX_LENGTH = 21
 LITE_SKIN_THRESHOLD = 0.38
 AVATAR_SKIN_THRESHOLD = 0.62
 LITE_MAX_IMAGE_SIZE = 8 * 1024 * 1024
@@ -79,6 +80,94 @@ LITE_REGEX_BLOCKLIST: Tuple[re.Pattern, ...] = (
     re.compile(r"\b(?:k\s*i\s*l\s*l|k[i\W_]*l+l)\b"),
     re.compile(r"\b(?:r\s*a\s*p\s*e|r[a\W_]*p[e\W_]*)\b"),
 )
+
+USERNAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+USERNAME_BLOCKLIST: Tuple[str, ...] = (
+    "fuck",
+    "fucker",
+    "fucking",
+    "motherfucker",
+    "shit",
+    "bullshit",
+    "asshole",
+    "bitch",
+    "bastard",
+    "dick",
+    "dickhead",
+    "pussy",
+    "cunt",
+    "slut",
+    "whore",
+    "damn",
+    "goddamn",
+    "prick",
+    "jackass",
+    "asshat",
+    "twat",
+    "wanker",
+    "porn",
+    "porno",
+    "pornhub",
+    "xxx",
+    "sex",
+    "sexy",
+    "blowjob",
+    "handjob",
+    "cum",
+    "jizz",
+    "orgasm",
+    "nudes",
+    "naked",
+    "fetish",
+    "bdsm",
+    "nigger",
+    "nigga",
+    "faggot",
+    "retard",
+    "spic",
+    "kike",
+    "chink",
+    "gook",
+    "tranny",
+    "dyke",
+    "cocaine",
+    "heroin",
+    "meth",
+    "crack",
+    "weed",
+    "druglord",
+    "cartel",
+    "dealer",
+    "kill",
+    "killer",
+    "murder",
+    "rapist",
+    "rape",
+    "terrorist",
+    "suicide",
+    "cock",
+)
+USERNAME_ROOT_BLOCKLIST: Tuple[str, ...] = ("kill", "sex", "drug", "rape", "porn", "nude")
+USERNAME_BYPASS_PATTERNS: Tuple[re.Pattern, ...] = (
+    re.compile(r"f[\W_]*u[\W_]*c[\W_]*k", re.I),
+    re.compile(r"sh[\W_]*i[\W_]*t", re.I),
+    re.compile(r"b[\W_]*i[\W_]*t[\W_]*c[\W_]*h", re.I),
+    re.compile(r"a[\W_]*\${2,}|a55", re.I),
+    re.compile(r"d[\W_]*i[\W_]*c[\W_]*k", re.I),
+    re.compile(r"c[\W_]*0[\W_]*c[\W_]*k", re.I),
+)
+USERNAME_LEET = {
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b",
+    "$": "s",
+    "!": "i",
+    "@": "a",
+}
 
 MODERATION_MODE = (settings.MODERATION_MODE or os.getenv("MODERATION_MODE", "lite")).lower()
 
@@ -188,6 +277,12 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", lowered).strip()
 
 
+def _normalize_username(text: str) -> str:
+    lowered = text.lower()
+    mapped = "".join(USERNAME_LEET.get(ch, ch) for ch in lowered)
+    return re.sub(r"[^a-z0-9]", "", mapped)
+
+
 def _moderate_text_lite(text: str | None) -> tuple[bool, str | None]:
     if text is None:
         return True, None
@@ -238,6 +333,42 @@ def _moderate_text_full(text: str | None) -> tuple[bool, str | None]:
     if worst_label and worst_score >= TEXT_UNSAFE_THRESHOLD:
         return False, f"Text rejected for unsafe content: {worst_label}."
 
+    return True, None
+
+
+def validate_username(text: str | None) -> tuple[bool, str | None]:
+    if text is None:
+        return False, "Username is required."
+    cleaned = text.strip()
+    if not cleaned:
+        return False, "Username is required."
+    if "@" in cleaned:
+        return False, "Usernames cannot include '@'."
+    if len(cleaned) < 3 or len(cleaned) > USERNAME_MAX_LENGTH:
+        return False, f"Username must be 3-{USERNAME_MAX_LENGTH} characters."
+    if not USERNAME_ALLOWED_RE.match(cleaned):
+        return False, "Usernames may only use letters, numbers, and underscores."
+    normalized = _normalize_username(cleaned)
+    if not normalized:
+        return False, "Username must include letters or numbers."
+    for pattern in USERNAME_BYPASS_PATTERNS:
+        if pattern.search(cleaned):
+            return (
+                False,
+                "Usernames should reflect prosperity, creativity, and positive identity. Please choose a different name.",
+            )
+    for word in USERNAME_BLOCKLIST:
+        if word in normalized:
+            return (
+                False,
+                "Usernames should reflect prosperity, creativity, and positive identity. Please choose a different name.",
+            )
+    for root in USERNAME_ROOT_BLOCKLIST:
+        if root in normalized:
+            return (
+                False,
+                "Usernames should reflect prosperity, creativity, and positive identity. Please choose a different name.",
+            )
     return True, None
 
 

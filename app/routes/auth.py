@@ -15,6 +15,7 @@ from app.schemas.user import (
     UserLogin,
     PasswordResetRequest,
     PasswordResetConfirm,
+    RefreshTokenRequest,
 )
 from pydantic import BaseModel
 from app.crud.crud_user import (
@@ -27,7 +28,9 @@ from app.crud.crud_subscriber import ensure_subscriber
 from app.core.security import (
     verify_password,
     create_access_token,
+    create_refresh_token,
     decode_access_token,
+    decode_refresh_token,
     get_current_user,
 )
 from app.schemas.account import AccountCreate
@@ -35,6 +38,8 @@ from app.schemas.ledger import LedgerEntryCreate
 from app.models.account import Account
 from app.models.ether import Profile, EtherSyncRequest
 from app.models.user import User
+from app.services.credit import ensure_credit_actions, record_daily_login, points_for_action_type
+from app.services.tier import is_premium
 from app.crud.crud_account import create_account
 from app.crud.crud_ledger import create_ledger_entry
 from app.db.session import get_db
@@ -44,7 +49,7 @@ from app.services.email import (
     send_password_reset_email,
     send_signup_alert_email,
 )
-from app.services.moderation import moderate_text
+from app.services.moderation import moderate_text, validate_username
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
 from app.services.ether_welcome import ensure_welcome_message
 from jose import JWTError, jwt
@@ -83,9 +88,9 @@ def _parse_state(state: str) -> dict:
 
 def _normalize_username(text: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_]+", "", text.replace(" ", "_")).lower()
-    cleaned = cleaned[:24]
+    cleaned = cleaned[:21]
     if len(cleaned) < 3:
-        cleaned = (cleaned + "user")[:24]
+        cleaned = (cleaned + "user")[:21]
     return cleaned or "member"
 
 def _unique_username(db: Session, base: str) -> str:
@@ -100,9 +105,9 @@ def _unique_username(db: Session, base: str) -> str:
 def register(user: UserCreate, db: Session = Depends(get_db)):
     if not user.accept_terms:
         raise HTTPException(status_code=400, detail="You must accept the Terms & Conditions and Privacy Policy.")
-    ok, reason = moderate_text(user.username)
+    ok, reason = validate_username(user.username)
     if not ok:
-        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
+        raise HTTPException(status_code=400, detail=reason or "Username rejected.")
     existing = get_user_by_email(db, user.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -335,8 +340,41 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    token = create_access_token({"sub": str(db_user.id)})
-    return {"access_token": token, "token_type": "bearer"}
+    ensure_credit_actions(db)
+    login_credit_awarded = record_daily_login(db, db_user.id)
+    login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
+
+    access_token = create_access_token({"sub": str(db_user.id)})
+    refresh_token = create_refresh_token({"sub": str(db_user.id)})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "login_credit_awarded": login_credit_awarded,
+        "login_credit_points": login_credit_points,
+    }
+
+
+@router.post("/refresh")
+def refresh_token(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+    try:
+        data = decode_refresh_token(payload.refresh_token)
+        if data.get("type") != "refresh":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        sub = data.get("sub")
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        user_id = int(sub)
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or getattr(user, "is_active", True) is False:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    access_token = create_access_token({"sub": str(user.id)})
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 
 @router.get("/me", response_model=UserRead)
 def read_me(current_user=Depends(get_current_user)):
@@ -387,6 +425,9 @@ def username_available(
     cleaned = username.strip()
     if not cleaned:
         return {"available": False}
+    ok, reason = validate_username(cleaned)
+    if not ok:
+        return {"available": False, "reason": reason}
     if current_user.username and cleaned.lower() == current_user.username.lower():
         return {"available": True}
     existing = (
@@ -404,9 +445,9 @@ def update_username(
     current_user=Depends(get_current_user),
 ):
     cleaned = payload.username.strip()
-    ok, reason = moderate_text(cleaned)
+    ok, reason = validate_username(cleaned)
     if not ok:
-        raise HTTPException(status_code=400, detail=reason or "Text rejected.")
+        raise HTTPException(status_code=400, detail=reason or "Username rejected.")
     if not cleaned:
         raise HTTPException(status_code=400, detail="Username required")
     if current_user.username and cleaned.lower() == current_user.username.lower():

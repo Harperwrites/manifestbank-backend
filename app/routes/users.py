@@ -7,7 +7,14 @@ from app.auth.deps import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import UserRead, UserWealthTargetUpdate
-from app.services.credit import record_credit_action, ensure_credit_actions
+try:
+    from app.services.credit import record_credit_action, ensure_credit_actions
+except Exception:
+    def ensure_credit_actions(db):  # type: ignore[no-redef]
+        return None
+
+    def record_credit_action(db, user_id: int, action: str):  # type: ignore[no-redef]
+        return None
 
 router = APIRouter(prefix="/users", tags=["users"])
 

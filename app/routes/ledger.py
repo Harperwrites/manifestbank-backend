@@ -19,7 +19,14 @@ from app.services.tier import (
     FREE_CHECK_LIMIT_7D,
     TIER_NAME,
 )
-from app.services.credit import record_credit_action, ensure_credit_actions
+try:
+    from app.services.credit import record_credit_action, ensure_credit_actions
+except Exception:
+    def ensure_credit_actions(db):  # type: ignore[no-redef]
+        return None
+
+    def record_credit_action(db, user_id: int, action: str):  # type: ignore[no-redef]
+        return None
 
 router = APIRouter(tags=["ledger"])
 

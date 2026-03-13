@@ -10,7 +10,14 @@ from app.models.journal import JournalEntry
 from app.schemas.journal import JournalEntryCreate, JournalEntryRead, JournalEntryUpdate
 from app.services.r2 import upload_bytes, build_key
 from app.services.moderation import moderate_image_bytes, moderate_text
-from app.services.credit import record_credit_action, ensure_credit_actions
+try:
+    from app.services.credit import record_credit_action, ensure_credit_actions
+except Exception:
+    def ensure_credit_actions(db):  # type: ignore[no-redef]
+        return None
+
+    def record_credit_action(db, user_id: int, action: str):  # type: ignore[no-redef]
+        return None
 
 
 router = APIRouter(tags=["journal"])

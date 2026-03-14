@@ -7,6 +7,8 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+_primary_daily_date = None
+_primary_daily_count = 0
 
 
 def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
@@ -33,10 +35,23 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
             timeout=10,
         )
 
+    # If a primary daily cap is configured, route to fallback before we hit the limit.
+    global _primary_daily_date, _primary_daily_count
+    if settings.RESEND_PRIMARY_DAILY_LIMIT:
+        today = datetime.now(UTC).date().isoformat()
+        if _primary_daily_date != today:
+            _primary_daily_date = today
+            _primary_daily_count = 0
+        buffer = max(0, settings.RESEND_PRIMARY_DAILY_BUFFER)
+        if _primary_daily_count >= max(0, settings.RESEND_PRIMARY_DAILY_LIMIT - buffer):
+            primary_key = None  # skip primary
+
     try:
-        res = _post(primary_key, payload)
-        res.raise_for_status()
-        return True
+        if primary_key:
+            res = _post(primary_key, payload)
+            res.raise_for_status()
+            _primary_daily_count += 1
+            return True
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
         logger.warning("Primary Resend failed (%s) for %s", status_code, to_email)

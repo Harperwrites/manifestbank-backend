@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str | None = None
     RESEND_FALLBACK_API_KEY: str | None = None
     RESEND_FALLBACK_FROM_EMAIL: str | None = None
+    RESEND_PRIMARY_DAILY_LIMIT: int | None = None
+    RESEND_PRIMARY_DAILY_BUFFER: int = 5
     SUBSCRIPTION_ALERT_EMAIL: str | None = "blharper95@gmail.com"
     SIGNUP_ALERT_EMAIL: str | None = None
     CONTACT_FORWARD_EMAIL: str | None = None

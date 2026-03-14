@@ -73,7 +73,7 @@ def post_due_entries(db: Session) -> int:
         account = db.query(Account).filter(Account.id == entry.account_id).first()
         user = db.query(User).filter(User.id == entry.created_by_user_id).first()
         if account and user and user.email_verified:
-            amount_str = f\"{ledger.amount:.2f} {ledger.currency}\"
+            amount_str = f"{ledger.amount:.2f} {ledger.currency}"
             send_ledger_post_email(
                 user.email,
                 account.name,

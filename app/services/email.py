@@ -45,6 +45,12 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
         buffer = max(0, settings.RESEND_PRIMARY_DAILY_BUFFER)
         if _primary_daily_count >= max(0, settings.RESEND_PRIMARY_DAILY_LIMIT - buffer):
             primary_key = None  # skip primary
+            logger.info(
+                "Primary Resend skipped due to daily cap guard (%s/%s, buffer=%s)",
+                _primary_daily_count,
+                settings.RESEND_PRIMARY_DAILY_LIMIT,
+                buffer,
+            )
 
     try:
         if primary_key:

@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.models.scheduled_entry import ScheduledEntry
 from app.models.ledger import LedgerEntry
+from app.models.account import Account
+from app.models.user import User
+from app.services.email import send_ledger_post_email
 from app.schemas.scheduled_entry import ScheduledEntryCreate
 
 
@@ -66,6 +69,19 @@ def post_due_entries(db: Session) -> int:
         entry.posted_at = now
         entry.posted_entry_id = ledger.id
         count += 1
+
+        account = db.query(Account).filter(Account.id == entry.account_id).first()
+        user = db.query(User).filter(User.id == entry.created_by_user_id).first()
+        if account and user and user.email_verified:
+            amount_str = f\"{ledger.amount:.2f} {ledger.currency}\"
+            send_ledger_post_email(
+                user.email,
+                account.name,
+                ledger.direction,
+                amount_str,
+                \"scheduled movement\",
+                f\"/dashboard/activity/{ledger.id}\",
+            )
 
     if count:
         db.commit()

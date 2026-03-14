@@ -9,6 +9,7 @@ from app.core.security import get_current_user, get_verified_user
 from app.schemas.ledger import LedgerEntryCreate, LedgerEntryRead, BalanceRead, TransferCreate
 from app.crud.crud_ledger import create_ledger_entry, list_ledger_entries, get_account_balance, create_transfer
 from app.crud.crud_account import get_account
+from app.services.email import send_ledger_post_email
 from app.services.tier import (
     is_premium,
     count_deposits_7d,
@@ -78,6 +79,16 @@ def post_entry(
     kind = str(meta.get("kind") or "").lower()
     if kind == "check":
         record_credit_action(db, current_user.id, "check_post")
+        if current_user.email_verified:
+            amount_str = f"{entry.amount:.2f} {entry.currency}"
+            send_ledger_post_email(
+                current_user.email,
+                acct.name,
+                entry.direction,
+                amount_str,
+                "check",
+                f"/dashboard/activity/{entry.id}",
+            )
     elif entry_type == "deposit":
         record_credit_action(db, current_user.id, "ledger_deposit")
     elif entry_type == "withdrawal":

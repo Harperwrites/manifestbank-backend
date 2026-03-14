@@ -9,13 +9,37 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def send_verification_email(to_email: str, token: str) -> bool:
+def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
     api_key = settings.RESEND_API_KEY
     sender = settings.RESEND_FROM_EMAIL
     if not api_key or not sender:
         logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
         return False
 
+    payload = {
+        "from": sender,
+        "to": [to_email],
+        "subject": subject,
+        "html": html,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+
+    try:
+        res = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10,
+        )
+        res.raise_for_status()
+        return True
+    except Exception:
+        logger.exception("Email failed for %s", to_email)
+        return False
+
+
+def send_verification_email(to_email: str, token: str) -> bool:
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     verify_url = f"{base}/verify-email?token={token}"
     html = f"""
@@ -35,34 +59,10 @@ def send_verification_email(to_email: str, token: str) -> bool:
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": "Verify your ManifestBank email",
-        "html": html,
-    }
-
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Verification email failed for %s", to_email)
-        return False
+    return _send_email(to_email, "Verify your ManifestBank email", html)
 
 
 def send_password_reset_email(to_email: str, token: str) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
-        return False
-
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     reset_url = f"{base}/reset-password?token={token}"
     html = f"""
@@ -82,34 +82,10 @@ def send_password_reset_email(to_email: str, token: str) -> bool:
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": "Reset your ManifestBank password",
-        "html": html,
-    }
-
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Password reset email failed for %s", to_email)
-        return False
+    return _send_email(to_email, "Reset your ManifestBank password", html)
 
 
 def send_signup_alert_email(to_email: str, user_email: str, username: str | None) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
-        return False
-
     display = username or user_email.split("@")[0]
     html = f"""
     <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
@@ -122,34 +98,10 @@ def send_signup_alert_email(to_email: str, user_email: str, username: str | None
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": "New ManifestBank signup",
-        "html": html,
-    }
-
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Signup alert email failed for %s", to_email)
-        return False
+    return _send_email(to_email, "New ManifestBank signup", html)
 
 
 def send_contact_email(to_email: str, name: str, email: str, subject: str, message: str) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
-        return False
-
     html = f"""
     <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
       <h2 style="margin: 0 0 10px;">New ManifestBank contact request</h2>
@@ -164,35 +116,10 @@ def send_contact_email(to_email: str, name: str, email: str, subject: str, messa
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "reply_to": email,
-        "subject": f"ManifestBank Contact: {subject}",
-        "html": html,
-    }
-
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Contact email failed for %s", email)
-        return False
+    return _send_email(to_email, f"ManifestBank Contact: {subject}", html, reply_to=email)
 
 
 def send_subscription_alert_email(to_email: str, user_email: str, username: str | None, plan: str | None) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
-        return False
-
     display = username or user_email.split("@")[0]
     plan_label = (plan or "annual").strip() or "annual"
     html = f"""
@@ -207,34 +134,10 @@ def send_subscription_alert_email(to_email: str, user_email: str, username: str 
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": "New ManifestBank™ Signature Member",
-        "html": html,
-    }
-
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Subscription alert email failed for %s", to_email)
-        return False
+    return _send_email(to_email, "New ManifestBank™ Signature Member", html)
 
 
 def send_trial_grant_email(to_email: str, username: str | None, trial_days: int) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
-        return False
-
     display = username or to_email.split("@")[0]
     html = f"""
     <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
@@ -254,22 +157,115 @@ def send_trial_grant_email(to_email: str, username: str | None, trial_days: int)
     </div>
     """
 
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": f"ManifestBank™ Signature — {trial_days} days on us",
-        "html": html,
-    }
+    return _send_email(to_email, f"ManifestBank™ Signature — {trial_days} days on us", html)
 
-    try:
-        res = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        res.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Trial grant email failed for %s", to_email)
-        return False
+
+def send_myline_message_email(
+    to_email: str,
+    sender_name: str,
+    thread_id: int,
+    preview: str,
+) -> bool:
+    base = settings.FRONTEND_BASE_URL.rstrip("/")
+    thread_url = f"{base}/myline/{thread_id}"
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <h2 style="margin: 0 0 10px;">New My Line message</h2>
+      <p style="margin: 0 0 12px;"><strong>{sender_name}</strong> sent you a new message.</p>
+      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">{preview}</p>
+      <p style="margin: 0 0 18px;">
+        <a href="{thread_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
+          Open My Line
+        </a>
+      </p>
+      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
+      <p style="font-size:12px;word-break:break-all;">{thread_url}</p>
+      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
+        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
+      </p>
+    </div>
+    """
+    return _send_email(to_email, "ManifestBank™ — New My Line message", html)
+
+
+def send_post_comment_email(
+    to_email: str,
+    commenter_name: str,
+    post_id: int,
+    comment_id: int,
+    preview: str,
+) -> bool:
+    base = settings.FRONTEND_BASE_URL.rstrip("/")
+    post_url = f"{base}/ether?post_id={post_id}&comment_id={comment_id}"
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <h2 style="margin: 0 0 10px;">New comment on your post</h2>
+      <p style="margin: 0 0 12px;"><strong>{commenter_name}</strong> commented on your post.</p>
+      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">{preview}</p>
+      <p style="margin: 0 0 18px;">
+        <a href="{post_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
+          View comment
+        </a>
+      </p>
+      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
+      <p style="font-size:12px;word-break:break-all;">{post_url}</p>
+      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
+        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
+      </p>
+    </div>
+    """
+    return _send_email(to_email, "ManifestBank™ — New comment", html)
+
+
+def send_ledger_post_email(
+    to_email: str,
+    account_name: str,
+    direction: str,
+    amount: str,
+    entry_type: str,
+    link_path: str,
+) -> bool:
+    base = settings.FRONTEND_BASE_URL.rstrip("/")
+    link = f"{base}{link_path}"
+    verb = "credited" if direction == "credit" else "debited"
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <h2 style="margin: 0 0 10px;">Account update</h2>
+      <p style="margin: 0 0 12px;">A {entry_type} was {verb} to <strong>{account_name}</strong>.</p>
+      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">
+        Amount: <strong>{amount}</strong>
+      </p>
+      <p style="margin: 0 0 18px;">
+        <a href="{link}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
+          View details
+        </a>
+      </p>
+      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
+      <p style="font-size:12px;word-break:break-all;">{link}</p>
+      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
+        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
+      </p>
+    </div>
+    """
+    return _send_email(to_email, "ManifestBank™ — Account update", html)
+
+
+def send_signature_account_fix_email(
+    to_email: str,
+    contact_line_html: str,
+) -> bool:
+    html = f"""
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
+      <p style="margin: 0 0 12px;">Dear ManifestBank™ Signature Member,</p>
+      <p style="margin: 0 0 12px;">Thank you for being a valued part of the ManifestBank™ community.</p>
+      <p style="margin: 0 0 12px;">We recently identified an issue that affected the creation of multiple accounts within some user dashboards. We sincerely apologize for any confusion or inconvenience this may have caused.</p>
+      <p style="margin: 0 0 12px;"><strong>The issue has now been fully resolved.</strong></p>
+      <p style="margin: 0 0 12px;">As a <strong>ManifestBank™ Signature Member</strong>, you can create <strong>unlimited accounts</strong> within your ManifestBank™ dashboard to organize your intentions, financial visualizations, and personal goals exactly the way you choose.</p>
+      <p style="margin: 0 0 12px;">Your continued support means a great deal to us, and we’re grateful to have you building this experience alongside us. ManifestBank™ is growing every day because of members like you who believe in the vision and actively use the platform.</p>
+      <p style="margin: 0 0 12px;">{contact_line_html}</p>
+      <p style="margin: 0 0 12px;">Thank you again for being part of ManifestBank™ and for being a Signature Member.</p>
+      <p style="margin: 18px 0 0;">Warm regards,<br/>The ManifestBank™ Team</p>
+    </div>
+    """
+    subject = "ManifestBank™ Update — Issue Resolved & Thank You for Your Support"
+    return _send_email(to_email, subject, html)

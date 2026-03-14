@@ -42,6 +42,7 @@ from app.schemas.ether import (
 )
 from app.services.r2 import upload_bytes, build_key
 from app.services.moderation import moderate_avatar_image_bytes, moderate_image_bytes, moderate_text
+from app.services.email import send_myline_message_email, send_post_comment_email
 from app.core.config import settings
 
 from urllib.request import urlopen
@@ -494,6 +495,25 @@ def add_comment(
         comment_id=comment.id,
     )
     db.commit()
+
+    if post.author_profile_id != profile.id:
+        recipient_profile = db.query(Profile).filter(Profile.id == post.author_profile_id).first()
+        recipient_user = (
+            db.query(User).filter(User.id == recipient_profile.user_id).first()
+            if recipient_profile
+            else None
+        )
+        if recipient_user and recipient_user.email_verified:
+            preview = (comment.content or "").strip()
+            if len(preview) > 180:
+                preview = preview[:177].rstrip() + "..."
+            send_post_comment_email(
+                recipient_user.email,
+                profile.display_name,
+                post.id,
+                comment.id,
+                preview or "New comment received.",
+            )
     return EtherCommentRead(
         id=comment.id,
         post_id=comment.post_id,
@@ -1344,6 +1364,32 @@ def send_message(
     db.add(msg)
     db.commit()
     db.refresh(msg)
+
+    preview = (msg.content or "").strip()
+    if len(preview) > 180:
+        preview = preview[:177].rstrip() + "..."
+    thread_members = (
+        db.query(EtherThreadMember)
+        .filter(EtherThreadMember.thread_id == thread_id)
+        .all()
+    )
+    profile_ids = [m.profile_id for m in thread_members if m.profile_id != profile.id]
+    if profile_ids:
+        recipients = (
+            db.query(Profile, User)
+            .join(User, User.id == Profile.user_id)
+            .filter(Profile.id.in_(profile_ids))
+            .all()
+        )
+        for recipient_profile, recipient_user in recipients:
+            if not recipient_user.email_verified:
+                continue
+            send_myline_message_email(
+                recipient_user.email,
+                profile.display_name,
+                thread_id,
+                preview or "New message received.",
+            )
     return msg
 
 

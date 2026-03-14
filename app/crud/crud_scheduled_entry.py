@@ -79,8 +79,8 @@ def post_due_entries(db: Session) -> int:
                 account.name,
                 ledger.direction,
                 amount_str,
-                \"scheduled movement\",
-                f\"/dashboard/activity/{ledger.id}\",
+                "scheduled movement",
+                f"/dashboard/activity/{ledger.id}",
             )
 
     if count:

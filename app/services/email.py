@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
-    api_key = settings.RESEND_API_KEY
-    sender = settings.RESEND_FROM_EMAIL
-    if not api_key or not sender:
+    primary_key = settings.RESEND_API_KEY
+    primary_sender = settings.RESEND_FROM_EMAIL
+    if not primary_key or not primary_sender:
         logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
         return False
 
     payload = {
-        "from": sender,
+        "from": primary_sender,
         "to": [to_email],
         "subject": subject,
         "html": html,
@@ -25,17 +25,41 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
     if reply_to:
         payload["reply_to"] = reply_to
 
-    try:
-        res = httpx.post(
+    def _post(api_key: str, body: dict) -> httpx.Response:
+        return httpx.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
+            json=body,
             timeout=10,
         )
+
+    try:
+        res = _post(primary_key, payload)
         res.raise_for_status()
         return True
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        logger.warning("Primary Resend failed (%s) for %s", status_code, to_email)
+        if status_code not in {429, 500, 502, 503, 504}:
+            logger.exception("Email failed for %s", to_email)
+            return False
     except Exception:
-        logger.exception("Email failed for %s", to_email)
+        logger.exception("Primary Resend error for %s", to_email)
+
+    fallback_key = settings.RESEND_FALLBACK_API_KEY
+    fallback_sender = settings.RESEND_FALLBACK_FROM_EMAIL
+    if not fallback_key or not fallback_sender:
+        logger.error("Fallback Resend credentials missing; verify RESEND_FALLBACK_API_KEY and RESEND_FALLBACK_FROM_EMAIL.")
+        return False
+
+    payload["from"] = fallback_sender
+    try:
+        res = _post(fallback_key, payload)
+        res.raise_for_status()
+        logger.info("Fallback Resend delivered for %s", to_email)
+        return True
+    except Exception:
+        logger.exception("Fallback Resend failed for %s", to_email)
         return False
 
 

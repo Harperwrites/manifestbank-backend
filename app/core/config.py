@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     R2_PUBLIC_BASE_URL: str | None = None
     RESEND_API_KEY: str | None = None
     RESEND_FROM_EMAIL: str | None = None
+    RESEND_FALLBACK_API_KEY: str | None = None
+    RESEND_FALLBACK_FROM_EMAIL: str | None = None
     SUBSCRIPTION_ALERT_EMAIL: str | None = "blharper95@gmail.com"
     SIGNUP_ALERT_EMAIL: str | None = None
     CONTACT_FORWARD_EMAIL: str | None = None

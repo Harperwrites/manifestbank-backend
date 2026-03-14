@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 import stripe
 
-from app.auth.deps import get_current_user
+from app.core.security import get_verified_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
@@ -34,7 +34,7 @@ def _price_for_plan(plan: str | None) -> str:
 def create_checkout_session(
     payload: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_verified_user),
 ):
     _require_stripe_key()
 
@@ -93,7 +93,7 @@ def create_checkout_session(
 @router.post("/portal-session")
 def create_portal_session(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_verified_user),
 ):
     _require_stripe_key()
     if not user.stripe_customer_id:

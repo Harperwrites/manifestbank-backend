@@ -51,6 +51,7 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
             res = _post(primary_key, payload)
             res.raise_for_status()
             _primary_daily_count += 1
+            logger.info("Primary Resend delivered for %s", to_email)
             return True
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code

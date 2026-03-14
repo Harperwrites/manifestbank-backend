@@ -25,10 +25,7 @@ from app.routes.contact import router as contact_router
 from app.routes.statements import router as statements_router
 from app.routes.legal import router as legal_router
 from app.routes.billing import router as billing_router
-try:
-    from app.routes.teller import router as teller_router
-except Exception:
-    teller_router = None
+from app.routes.teller import router as teller_router
 try:
     from app.routes.credit import router as credit_router
 except Exception:
@@ -65,8 +62,7 @@ app.include_router(contact_router)
 app.include_router(statements_router)
 app.include_router(legal_router)
 app.include_router(billing_router)
-if teller_router is not None:
-    app.include_router(teller_router)
+app.include_router(teller_router)
 if credit_router is not None:
     app.include_router(credit_router)
 

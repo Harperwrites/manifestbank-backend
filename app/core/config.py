@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./app.db"
 
     SECRET_KEY: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200
     REFRESH_TOKEN_EXPIRE_DAYS: int = 90
     ALGORITHM: str = "HS256"
     CORS_ORIGINS: str = "http://localhost:3000"

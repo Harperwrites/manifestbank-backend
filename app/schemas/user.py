@@ -36,6 +36,7 @@ class UserRead(BaseModel):
     stripe_current_period_end: datetime | None = None
     stripe_trial_end: datetime | None = None
     stripe_cancel_at_period_end: bool | None = False
+    dashboard_currency: str | None = "USD"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,3 +57,7 @@ class PasswordResetConfirm(BaseModel):
 
 class UserWealthTargetUpdate(BaseModel):
     wealth_target_usd: float | None = None
+
+
+class UserDashboardCurrencyUpdate(BaseModel):
+    dashboard_currency: str

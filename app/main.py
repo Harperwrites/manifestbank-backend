@@ -2,7 +2,10 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from app.core.config import settings
+from app.services.r2 import LOCAL_UPLOADS_DIR
 
 from app.routes.auth import router as auth_router
 from app.routes.accounts import router as accounts_router
@@ -65,6 +68,9 @@ app.include_router(billing_router)
 app.include_router(teller_router)
 if credit_router is not None:
     app.include_router(credit_router)
+
+os.makedirs(LOCAL_UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=LOCAL_UPLOADS_DIR), name="uploads")
 
 # Optional compatibility: POST /transfer (some earlier tests/tools used this)
 from app.routes.transactions import transfer_route as root_transfer_route  # noqa: E402

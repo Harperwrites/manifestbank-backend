@@ -19,6 +19,7 @@ from app.models.ether import (
     EtherThread,
     EtherThreadMember,
     EtherMessage,
+    EtherMessageLike,
     EtherSyncRequest,
 )
 from app.models.pwa import PwaEvent

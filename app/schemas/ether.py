@@ -121,6 +121,8 @@ class EtherMessageRead(BaseModel):
     sender_profile_id: int
     content: str
     created_at: datetime
+    align_count: int = 0
+    aligned_by_me: bool = False
 
     class Config:
         from_attributes = True

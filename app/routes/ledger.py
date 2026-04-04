@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.core.security import get_current_user, get_verified_user
 from app.schemas.ledger import LedgerEntryCreate, LedgerEntryRead, BalanceRead, TransferCreate
 from app.crud.crud_ledger import create_ledger_entry, list_ledger_entries, get_account_balance, create_transfer
+from app.services.fx import convert_amount_with_rate
 from app.crud.crud_account import get_account
 from app.services.email import send_ledger_post_email
 from app.services.tier import (
@@ -15,6 +16,7 @@ from app.services.tier import (
     count_deposits_7d,
     count_expenses_7d,
     count_checks_7d,
+    get_free_tier_status,
     FREE_DEPOSIT_LIMIT_7D,
     FREE_EXPENSE_LIMIT_7D,
     FREE_CHECK_LIMIT_7D,
@@ -34,6 +36,14 @@ router = APIRouter(tags=["ledger"])
 
 def is_admin(user) -> bool:
     return getattr(user, "role", None) == "admin"
+
+
+@router.get("/ledger/free-tier-status")
+def free_tier_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return get_free_tier_status(db, current_user.id)
 
 
 @router.post("/ledger/entries", response_model=LedgerEntryRead)
@@ -150,19 +160,81 @@ def transfer_funds(
     if (to_acct.owner_user_id != current_user.id) and (not is_admin(current_user)):
         raise HTTPException(status_code=403, detail="Not allowed")
 
+    base_currency = (payload.currency or from_acct.currency or "USD").upper()
+    debit_currency = (from_acct.currency or base_currency).upper()
+    credit_currency = (to_acct.currency or base_currency).upper()
+    debit_amount, missing_debit, debit_rate = convert_amount_with_rate(
+        payload.amount, base_currency, debit_currency
+    )
+    credit_amount, missing_credit, credit_rate = convert_amount_with_rate(
+        payload.amount, base_currency, credit_currency
+    )
+
+    fx_meta = {
+        "fx_base_currency": base_currency,
+        "fx_debit_currency": debit_currency,
+        "fx_credit_currency": credit_currency,
+        "fx_debit_rate": str(debit_rate),
+        "fx_credit_rate": str(credit_rate),
+        "fx_timestamp": datetime.now(UTC).isoformat(),
+        "fx_missing_rates": list({*missing_debit, *missing_credit}),
+    }
+
     debit, credit = create_transfer(
         db,
         current_user.id,
         payload.from_account_id,
         payload.to_account_id,
-        payload.amount,
-        payload.currency,
+        debit_amount,
+        debit_currency,
+        credit_amount,
+        credit_currency,
         memo=payload.memo,
         reference=payload.reference,
+        meta=fx_meta,
     )
     ensure_credit_actions(db)
     record_credit_action(db, current_user.id, "ledger_transfer")
     return {
         "debit": LedgerEntryRead.model_validate(debit),
         "credit": LedgerEntryRead.model_validate(credit),
+    }
+
+
+@router.post("/transfers/preview")
+def preview_transfer(
+    payload: TransferCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_verified_user),
+):
+    from_acct = get_account(db, payload.from_account_id)
+    to_acct = get_account(db, payload.to_account_id)
+    if not from_acct or not to_acct:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if (from_acct.owner_user_id != current_user.id) and (not is_admin(current_user)):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    if (to_acct.owner_user_id != current_user.id) and (not is_admin(current_user)):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    base_currency = (payload.currency or from_acct.currency or "USD").upper()
+    debit_currency = (from_acct.currency or base_currency).upper()
+    credit_currency = (to_acct.currency or base_currency).upper()
+
+    debit_amount, missing_debit, debit_rate = convert_amount_with_rate(
+        payload.amount, base_currency, debit_currency
+    )
+    credit_amount, missing_credit, credit_rate = convert_amount_with_rate(
+        payload.amount, base_currency, credit_currency
+    )
+
+    return {
+        "base_currency": base_currency,
+        "debit_currency": debit_currency,
+        "credit_currency": credit_currency,
+        "debit_amount": debit_amount,
+        "credit_amount": credit_amount,
+        "debit_rate": str(debit_rate),
+        "credit_rate": str(credit_rate),
+        "fx_timestamp": datetime.now(UTC).isoformat(),
+        "missing_rates": list({*missing_debit, *missing_credit}),
     }

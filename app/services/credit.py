@@ -183,6 +183,7 @@ def _snapshot_columns(db: Session) -> set[str]:
         rows = db.execute(text("PRAGMA table_info('credit_score_snapshots')")).fetchall()
         return {row[1] for row in rows}
     except Exception:
+        db.rollback()
         return set()
 
 

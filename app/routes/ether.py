@@ -19,6 +19,7 @@ from app.models.ether import (
     EtherThread,
     EtherThreadMember,
     EtherMessage,
+    EtherMessageLike,
     EtherSyncRequest,
     EtherNotification,
 )
@@ -309,6 +310,44 @@ def create_notification(
     db.add(notification)
 
 
+def build_message_reads(db: Session, messages: list[EtherMessage], viewer_profile_id: int) -> list[EtherMessageRead]:
+    if not messages:
+        return []
+    message_ids = [message.id for message in messages]
+    counts = {
+        message_id: count
+        for message_id, count in (
+            db.query(EtherMessageLike.message_id, func.count(EtherMessageLike.id))
+            .filter(EtherMessageLike.message_id.in_(message_ids))
+            .group_by(EtherMessageLike.message_id)
+            .all()
+        )
+    }
+    liked_ids = {
+        row.message_id
+        for row in (
+            db.query(EtherMessageLike.message_id)
+            .filter(
+                EtherMessageLike.message_id.in_(message_ids),
+                EtherMessageLike.profile_id == viewer_profile_id,
+            )
+            .all()
+        )
+    }
+    return [
+        EtherMessageRead(
+            id=message.id,
+            thread_id=message.thread_id,
+            sender_profile_id=message.sender_profile_id,
+            content=message.content,
+            created_at=message.created_at,
+            align_count=int(counts.get(message.id, 0) or 0),
+            aligned_by_me=message.id in liked_ids,
+        )
+        for message in messages
+    ]
+
+
 @router.get("/ether/posts/mine", response_model=list[EtherPostRead])
 def my_posts(
     db: Session = Depends(get_db),
@@ -356,7 +395,7 @@ def posts_by_profile(
         )
         if not approved:
             user = db.query(User).filter(User.id == target.user_id).first()
-            display = (user.username if user else None) or (user.email if user else None) or target.display_name
+            display = target.display_name or (user.username if user else None) or (user.email if user else None)
             return ProfileRead(
                 id=target.id,
                 user_id=target.user_id,
@@ -737,7 +776,7 @@ def search_profiles(
     payload = []
     for prof in profiles_by_id.values():
         user = users_by_id.get(prof.user_id)
-        display = (user.username if user else None) or (user.email if user else None) or prof.display_name
+        display = prof.display_name or (user.username if user else None) or (user.email if user else None)
         payload.append(
             ProfileRead(
                 id=prof.id,
@@ -788,7 +827,7 @@ def get_profile(
             .first()
         )
         if not approved:
-            display = (user.username if user else None) or (user.email if user else None) or target.display_name
+            display = target.display_name or (user.username if user else None) or (user.email if user else None)
             return ProfileRead(
                 id=target.id,
                 user_id=target.user_id,
@@ -802,7 +841,7 @@ def get_profile(
                 created_at=target.created_at,
             )
 
-    display = (user.username if user else None) or (user.email if user else None) or target.display_name
+    display = target.display_name or (user.username if user else None) or (user.email if user else None)
     return ProfileRead(
         id=target.id,
         user_id=target.user_id,
@@ -1314,9 +1353,9 @@ def list_thread_previews(
             prof = profile_map.get(counterpart_id)
             user = user_map.get(prof.user_id) if prof else None
             counterpart_display_name = (
-                (user.username if user else None)
+                (prof.display_name if prof else None)
+                or (user.username if user else None)
                 or (user.email if user else None)
-                or (prof.display_name if prof else None)
             )
             counterpart_avatar_url = prof.avatar_url if prof else None
         previews.append(
@@ -1390,7 +1429,7 @@ def send_message(
                 thread_id,
                 preview or "New message received.",
             )
-    return msg
+    return build_message_reads(db, [msg], profile.id)[0]
 
 
 @router.get("/ether/threads/{thread_id}/messages", response_model=list[EtherMessageRead])
@@ -1419,7 +1458,60 @@ def list_messages(
         .limit(limit)
         .all()
     )
-    return list(reversed(items))
+    return build_message_reads(db, list(reversed(items)), profile.id)
+
+
+@router.post("/ether/messages/{message_id}/align")
+def toggle_message_align(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    profile = get_or_create_profile(db, current_user)
+    message = db.query(EtherMessage).filter(EtherMessage.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    member = (
+        db.query(EtherThreadMember)
+        .filter(
+            EtherThreadMember.thread_id == message.thread_id,
+            EtherThreadMember.profile_id == profile.id,
+        )
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a thread member")
+
+    existing = (
+        db.query(EtherMessageLike)
+        .filter(EtherMessageLike.message_id == message_id, EtherMessageLike.profile_id == profile.id)
+        .first()
+    )
+    if existing:
+        db.delete(existing)
+        db.commit()
+        count = (
+            db.query(EtherMessageLike)
+            .filter(EtherMessageLike.message_id == message_id)
+            .count()
+        )
+        return {"status": "unaligned", "align_count": count}
+
+    like = EtherMessageLike(message_id=message_id, profile_id=profile.id)
+    db.add(like)
+    create_notification(
+        db,
+        recipient_profile_id=message.sender_profile_id,
+        actor_profile_id=profile.id,
+        kind="message_align",
+    )
+    db.commit()
+    count = (
+        db.query(EtherMessageLike)
+        .filter(EtherMessageLike.message_id == message_id)
+        .count()
+    )
+    return {"status": "aligned", "align_count": count}
 
 
 @router.post("/ether/threads/{thread_id}/clear")

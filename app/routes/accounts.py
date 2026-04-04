@@ -11,6 +11,7 @@ from app.crud.crud_account import (
     list_accounts_for_user,
     get_account,
     update_account_name,
+    update_account_fields,
     delete_account,
 )
 from app.services.tier import is_premium, TIER_NAME
@@ -78,10 +79,22 @@ def update_account(
 ):
     account = get_account(db, account_id)
     ensure_access(account, current_user)
-    name = payload.name.strip() if payload.name else ""
-    if not name:
+    name = payload.name.strip() if payload.name else None
+    currency = payload.currency.strip().upper() if payload.currency else None
+    is_active = payload.is_active
+    if currency:
+        if not is_premium(current_user):
+            raise HTTPException(
+                status_code=402,
+                detail=f"{TIER_NAME} required to change account currency.",
+            )
+        if len(currency) != 3 or not currency.isalpha():
+            raise HTTPException(status_code=400, detail="Currency must be a 3-letter code")
+    if name is None and currency is None and is_active is None:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if name is not None and not name:
         raise HTTPException(status_code=400, detail="Account name required")
-    return update_account_name(db, account, name)
+    return update_account_fields(db, account, name, currency, is_active)
 
 
 @router.delete("/accounts/{account_id}")

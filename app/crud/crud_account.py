@@ -22,6 +22,7 @@ def create_account(db: Session, owner_user_id: int, data: AccountCreate) -> Acco
         parent_account_id=data.parent_account_id,
         name=data.name,
         account_type=data.account_type,
+        currency=(data.currency or "USD").upper(),
         legal_name=data.legal_name,
         jurisdiction=data.jurisdiction,
         notes=data.notes,
@@ -44,6 +45,25 @@ def list_accounts_for_user(db: Session, owner_user_id: int) -> list[Account]:
 
 def update_account_name(db: Session, account: Account, name: str) -> Account:
     account.name = name
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def update_account_fields(
+    db: Session,
+    account: Account,
+    name: str | None,
+    currency: str | None,
+    is_active: bool | None = None,
+) -> Account:
+    if name is not None:
+        account.name = name
+    if currency is not None:
+        account.currency = currency
+    if is_active is not None:
+        account.is_active = is_active
     db.add(account)
     db.commit()
     db.refresh(account)

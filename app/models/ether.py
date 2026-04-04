@@ -160,3 +160,16 @@ class EtherMessage(Base):
 
     thread = relationship("EtherThread", foreign_keys=[thread_id])
     sender = relationship("Profile", foreign_keys=[sender_profile_id])
+
+
+class EtherMessageLike(Base):
+    __tablename__ = "ether_message_likes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("ether_messages.id"), nullable=False, index=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("message_id", "profile_id", name="uq_ether_message_like"),
+    )

@@ -2,7 +2,10 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from app.core.config import settings
+from app.services.r2 import LOCAL_UPLOADS_DIR
 
 from app.routes.auth import router as auth_router
 from app.routes.accounts import router as accounts_router
@@ -25,10 +28,7 @@ from app.routes.contact import router as contact_router
 from app.routes.statements import router as statements_router
 from app.routes.legal import router as legal_router
 from app.routes.billing import router as billing_router
-try:
-    from app.routes.teller import router as teller_router
-except Exception:
-    teller_router = None
+from app.routes.teller import router as teller_router
 try:
     from app.routes.credit import router as credit_router
 except Exception:
@@ -65,10 +65,12 @@ app.include_router(contact_router)
 app.include_router(statements_router)
 app.include_router(legal_router)
 app.include_router(billing_router)
-if teller_router is not None:
-    app.include_router(teller_router)
+app.include_router(teller_router)
 if credit_router is not None:
     app.include_router(credit_router)
+
+os.makedirs(LOCAL_UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=LOCAL_UPLOADS_DIR), name="uploads")
 
 # Optional compatibility: POST /transfer (some earlier tests/tools used this)
 from app.routes.transactions import transfer_route as root_transfer_route  # noqa: E402

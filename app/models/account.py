@@ -17,6 +17,7 @@ class Account(Base):
 
     name = Column(String, nullable=False)
     account_type = Column(String, nullable=False, default="personal")
+    currency = Column(String, nullable=False, default="USD")
 
     legal_name = Column(String, nullable=True)
     jurisdiction = Column(String, nullable=True)

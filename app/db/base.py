@@ -19,15 +19,13 @@ from app.models.ether import (
     EtherThread,
     EtherThreadMember,
     EtherMessage,
+    EtherMessageLike,
     EtherSyncRequest,
 )
 from app.models.pwa import PwaEvent
 from app.models.journal import JournalEntry
 from app.models.affirmation import AffirmationEntry
-try:
-    from app.models.teller import TellerThread, TellerMessage, TellerAuditLog
-except Exception:
-    TellerThread = TellerMessage = TellerAuditLog = None  # type: ignore
+from app.models.teller import TellerThread, TellerMessage, TellerAuditLog
 try:
     from app.models.credit import CreditAction, CreditActionCompletion, CreditScoreSnapshot, CreditTodo
 except Exception:

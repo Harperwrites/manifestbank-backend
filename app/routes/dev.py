@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.crud.crud_user import create_user, get_user_by_email, get_user_by_username
 from app.db.session import get_db
+from app.legal.content import TERMS_HASH, PRIVACY_HASH
 from app.models.ether import EtherSyncRequest, Profile
 from app.models.user import User
 
@@ -20,6 +21,7 @@ class SeedUserRequest(BaseModel):
     username: str | None = None
     password: str | None = None
     verified: bool = False
+    premium: bool = False
 
 
 class SyncAllRequest(BaseModel):
@@ -49,10 +51,18 @@ def seed_user(
         raise HTTPException(status_code=400, detail="Username already registered")
 
     user = create_user(db, email, password, username)
+    now = datetime.now(UTC)
+    user.terms_accepted_at = now
+    user.privacy_accepted_at = now
+    user.terms_version = TERMS_HASH
+    user.privacy_version = PRIVACY_HASH
     if payload.verified:
         user.email_verified = True
         user.email_verification_token = None
         user.email_verification_expires_at = None
+    if payload.premium:
+        user.is_premium = True
+    if payload.verified or payload.premium:
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -100,6 +110,7 @@ def seed_user(
         "username": user.username,
         "password": password,
         "email_verified": user.email_verified,
+        "is_premium": user.is_premium,
         "profile_id": profile.id,
     }
 

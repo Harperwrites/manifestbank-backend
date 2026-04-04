@@ -8,6 +8,7 @@ from datetime import datetime
 from app.models.ledger import LedgerEntry
 from app.models.account import Account
 from app.schemas.ledger import LedgerEntryCreate
+from app.services.fx import convert_amount
 
 
 def create_ledger_entry(db: Session, created_by_user_id: int, payload: LedgerEntryCreate) -> LedgerEntry:
@@ -68,28 +69,20 @@ def get_account_balance(db: Session, account_id: int, currency: str = "USD") -> 
         ]
         account_ids.extend(child_ids)
 
-    credit_sum = func.coalesce(
-        func.sum(case((LedgerEntry.direction == "credit", LedgerEntry.amount), else_=0)),
-        0,
+    entries = (
+        db.query(LedgerEntry)
+        .filter(LedgerEntry.account_id.in_(account_ids), LedgerEntry.status == "posted")
+        .all()
     )
-    debit_sum = func.coalesce(
-        func.sum(case((LedgerEntry.direction == "debit", LedgerEntry.amount), else_=0)),
-        0,
-    )
-
-    row = (
-        db.query(credit_sum.label("credits"), debit_sum.label("debits"))
-        .filter(
-            LedgerEntry.account_id.in_(account_ids),
-            LedgerEntry.status == "posted",
-            LedgerEntry.currency == currency,
-        )
-        .first()
-    )
-
-    credits = Decimal(str(row.credits or 0))
-    debits = Decimal(str(row.debits or 0))
-    return credits - debits
+    total = Decimal("0")
+    for entry in entries:
+        amount = Decimal(str(entry.amount or 0))
+        converted = convert_amount(amount, entry.currency or currency, currency)
+        if entry.direction == "credit":
+            total += converted
+        else:
+            total -= converted
+    return total
 
 
 def create_transfer(
@@ -97,18 +90,25 @@ def create_transfer(
     created_by_user_id: int,
     from_account_id: int,
     to_account_id: int,
-    amount: Decimal,
-    currency: str = "USD",
+    debit_amount: Decimal,
+    debit_currency: str,
+    credit_amount: Decimal,
+    credit_currency: str,
     memo: str | None = None,
     reference: str | None = None,
+    meta: dict | None = None,
 ) -> tuple[LedgerEntry, LedgerEntry]:
-    transfer_meta = {"transfer_id": f"{from_account_id}->{to_account_id}:{datetime.utcnow().timestamp()}"}
+    transfer_meta = {
+        "transfer_id": f"{from_account_id}->{to_account_id}:{datetime.utcnow().timestamp()}"
+    }
+    if meta:
+        transfer_meta.update(meta)
     debit = LedgerEntry(
         account_id=from_account_id,
         created_by_user_id=created_by_user_id,
         direction="debit",
-        amount=amount,
-        currency=currency,
+        amount=debit_amount,
+        currency=debit_currency,
         entry_type="transfer",
         status="posted",
         reference=reference,
@@ -119,8 +119,8 @@ def create_transfer(
         account_id=to_account_id,
         created_by_user_id=created_by_user_id,
         direction="credit",
-        amount=amount,
-        currency=currency,
+        amount=credit_amount,
+        currency=credit_currency,
         entry_type="transfer",
         status="posted",
         reference=reference,

@@ -1,12 +1,15 @@
 import pytest
 
 @pytest.mark.asyncio
-async def test_deposit_withdraw_flow(client):
-    await client.post("/auth/register", json={"email": "x@test.com", "password": "123"})
-    login = await client.post("/auth/login", json={"email": "x@test.com", "password": "123"})
+async def test_deposit_withdraw_flow(client, auth_helper):
+    login = await auth_helper(client, "x@test.com", "123", "xtest")
     token = login.json()["access_token"]
 
-    acc = await client.post("/accounts/", json={"type": "checking"}, headers={"Authorization": f"Bearer {token}"})
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Checking", "account_type": "personal"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     acc_id = acc.json()["id"]
 
     # deposit
@@ -18,18 +21,25 @@ async def test_deposit_withdraw_flow(client):
     assert wd.status_code == 200
 
     # check balance
-    acc = await client.get(f"/accounts/{acc_id}", headers={"Authorization": f"Bearer {token}"})
-    assert acc.json()["balance"] == 300
+    bal = await client.get(f"/accounts/{acc_id}/balance?currency=USD", headers={"Authorization": f"Bearer {token}"})
+    assert float(bal.json()["balance"]) == 300
 
 
 @pytest.mark.asyncio
-async def test_transfer_flow(client):
-    await client.post("/auth/register", json={"email": "c@test.com", "password": "123"})
-    login = await client.post("/auth/login", json={"email": "c@test.com", "password": "123"})
+async def test_transfer_flow(client, auth_helper):
+    login = await auth_helper(client, "c@test.com", "123", "ctest")
     token = login.json()["access_token"]
 
-    a1 = await client.post("/accounts/", json={"type": "checking"}, headers={"Authorization": f"Bearer {token}"})
-    a2 = await client.post("/accounts/", json={"type": "savings"}, headers={"Authorization": f"Bearer {token}"})
+    a1 = await client.post(
+        "/accounts",
+        json={"name": "A1", "account_type": "personal"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    a2 = await client.post(
+        "/accounts",
+        json={"name": "A2", "account_type": "personal"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
     id1 = a1.json()["id"]
     id2 = a2.json()["id"]

@@ -1,7 +1,7 @@
 # app/schemas/ether.py
 
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ProfileRead(BaseModel):
@@ -16,8 +16,7 @@ class ProfileRead(BaseModel):
     store_url: str | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProfileUpdate(BaseModel):
@@ -48,8 +47,7 @@ class EtherPostRead(BaseModel):
     author_display_name: str | None = None
     author_avatar_url: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EtherCommentCreate(BaseModel):
@@ -67,8 +65,7 @@ class EtherCommentRead(BaseModel):
     align_count: int = 0
     aligned_by_me: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EtherGroupCreate(BaseModel):
@@ -85,8 +82,7 @@ class EtherGroupRead(BaseModel):
     created_by_profile_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EtherThreadCreate(BaseModel):
@@ -124,8 +120,7 @@ class EtherMessageRead(BaseModel):
     align_count: int = 0
     aligned_by_me: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EtherSyncRequestRead(BaseModel):
@@ -140,8 +135,7 @@ class EtherSyncRequestRead(BaseModel):
     requester_display_name: str | None = None
     requester_avatar_url: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EtherNotificationRead(BaseModel):
@@ -156,5 +150,4 @@ class EtherNotificationRead(BaseModel):
     actor_display_name: str | None = None
     actor_avatar_url: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

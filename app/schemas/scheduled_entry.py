@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ScheduledEntryCreate(BaseModel):
@@ -32,5 +32,4 @@ class ScheduledEntryRead(BaseModel):
     posted_at: datetime | None = None
     posted_entry_id: int | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

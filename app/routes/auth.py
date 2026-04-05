@@ -303,6 +303,10 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
             db.add(db_user)
             db.commit()
 
+    ensure_credit_actions(db)
+    login_credit_awarded = record_daily_login(db, db_user.id)
+    login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
+
     access_token = create_access_token({"sub": str(db_user.id)})
     next_path = state_data.get("next") or "/dashboard"
     keep = "1"
@@ -313,6 +317,8 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     redirect_url = (
         f"{settings.FRONTEND_BASE_URL}/auth/google/callback?token={access_token}"
         f"&next={next_path}&keep={keep}"
+        f"&login_credit_awarded={'1' if login_credit_awarded else '0'}"
+        f"&login_credit_points={login_credit_points}"
     )
     return RedirectResponse(redirect_url)
 

@@ -1,6 +1,9 @@
 import pytest
+from urllib.parse import parse_qs, urlparse
+
 from app.models.ether import Profile
 from app.models.user import User
+from app.routes import auth as auth_routes
 
 @pytest.mark.asyncio
 async def test_register_duplicate(client):
@@ -116,3 +119,56 @@ async def test_ether_profile_routes_prefer_ether_display_name_over_dashboard_use
     assert public_profile.status_code == 200
     assert me_profile.json()["display_name"] == "Ether Persona"
     assert public_profile.json()["display_name"] == "Ether Persona"
+
+
+@pytest.mark.asyncio
+async def test_google_callback_awards_daily_login_once_and_redirects_with_credit_flag(client):
+    class DummyResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    auth_routes.settings.GOOGLE_CLIENT_ID = "test-google-client"
+    auth_routes.settings.GOOGLE_CLIENT_SECRET = "test-google-secret"
+    auth_routes.settings.GOOGLE_REDIRECT_URI = "http://test/auth/google/callback"
+    auth_routes.settings.FRONTEND_BASE_URL = "http://localhost:3000"
+
+    original_post = auth_routes.httpx.post
+    original_get = auth_routes.httpx.get
+
+    auth_routes.httpx.post = lambda *args, **kwargs: DummyResponse(200, {"id_token": "google-id-token"})
+    auth_routes.httpx.get = lambda *args, **kwargs: DummyResponse(
+        200,
+        {"email": "googlecredit@test.com", "name": "Google Credit User"},
+    )
+    state = auth_routes._create_state("/dashboard", "1")
+
+    try:
+        response = await client.get(f"/auth/google/callback?code=test-code&state={state}", follow_redirects=False)
+    finally:
+        auth_routes.httpx.post = original_post
+        auth_routes.httpx.get = original_get
+
+    assert response.status_code in (302, 307)
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    params = parse_qs(parsed.query)
+
+    assert parsed.path == "/auth/google/callback"
+    assert params["login_credit_awarded"] == ["1"]
+    assert params["login_credit_points"] == ["1"]
+    assert "token" in params
+
+    token = params["token"][0]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    report = await client.get("/credit/report", headers=headers)
+    assert report.status_code == 200
+    assert len([item for item in report.json()["items"] if item["action_type"] == "daily_login"]) == 1
+
+    second_daily = await client.post("/credit/daily-login", headers=headers)
+    assert second_daily.status_code == 200
+    assert second_daily.json() == {"awarded": False, "points": 0}

@@ -1,9 +1,12 @@
 # app/main.py
 
+import asyncio
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os
 from app.core.config import settings
 from app.services.r2 import LOCAL_UPLOADS_DIR
 
@@ -34,9 +37,15 @@ try:
 except Exception:
     credit_router = None
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.services.scheduler import schedule_loop
+
+    asyncio.create_task(schedule_loop())
+    yield
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 init_db()
 
@@ -101,11 +110,3 @@ def health_check():
         "googleAuthStart": "/auth/google/start",
         "googleAuthCallback": "/auth/google/callback",
     }
-
-
-@app.on_event("startup")
-async def start_scheduler():
-    from app.services.scheduler import schedule_loop
-    import asyncio
-
-    asyncio.create_task(schedule_loop())

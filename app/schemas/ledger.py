@@ -1,6 +1,6 @@
 # app/schemas/ledger.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Literal, Any
 from decimal import Decimal
 from datetime import datetime
@@ -51,8 +51,7 @@ class LedgerEntryRead(BaseModel):
 
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BalanceRead(BaseModel):

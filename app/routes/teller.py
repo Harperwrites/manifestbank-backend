@@ -1414,6 +1414,11 @@ def delete_thread(
     )
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
+    (
+        db.query(TellerAuditLog)
+        .filter(TellerAuditLog.thread_id == thread.id, TellerAuditLog.user_id == current_user.id)
+        .delete(synchronize_session=False)
+    )
     db.delete(thread)
     db.commit()
     return {"status": "deleted"}

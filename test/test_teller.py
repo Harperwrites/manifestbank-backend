@@ -880,6 +880,44 @@ async def test_teller_account_lists_use_native_currency_balances(client, db):
 
 
 @pytest.mark.asyncio
+async def test_teller_thread_delete_removes_associated_audit_rows(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_delete_thread")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create_account_resp = await client.post(
+        "/accounts",
+        json={"name": "Miracles", "account_type": "personal", "currency": "USD"},
+        headers=headers,
+    )
+    assert create_account_resp.status_code == 200
+
+    first = await client.post(
+        "/teller/chat",
+        json={"thread_id": None, "message": "deposit 300 miracles"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert "Confirm deposit $300.00 into “Miracles”?" in first.json()["assistant_message"]["content"]
+
+    second = await client.post(
+        "/teller/chat",
+        json={"thread_id": thread_id, "message": "yes"},
+        headers=headers,
+    )
+    assert second.status_code == 200
+    assert "Done. I deposited $300.00 into “Miracles”." in second.json()["assistant_message"]["content"]
+
+    deleted = await client.delete(f"/teller/threads/{thread_id}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+
+    messages = await client.get(f"/teller/threads/{thread_id}/messages", headers=headers)
+    assert messages.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_teller_general_balance_shows_all_balances_for_balance_keyword(client, db):
     rate_limiter.buckets.clear()
     token = await _safe_login(client, db, "teller_balance_keyword")

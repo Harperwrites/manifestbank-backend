@@ -36,6 +36,11 @@ class User(Base):
     privacy_accepted_at = Column(DateTime(timezone=True), nullable=True)
     terms_version = Column(String, nullable=True)
     privacy_version = Column(String, nullable=True)
+    legal_acceptances = relationship(
+        "LegalAcceptance",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     # ✅ User.accounts <-> Account.owner
     accounts = relationship(

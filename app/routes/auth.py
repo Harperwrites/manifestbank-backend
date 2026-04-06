@@ -61,6 +61,7 @@ from app.services.email import (
 )
 from app.services.moderation import moderate_text, validate_username
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
+from app.services.legal_acceptance import record_legal_acceptances
 from app.services.ether_welcome import ensure_welcome_message
 from jose import JWTError, jwt
 
@@ -125,12 +126,20 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already registered")
     created = create_user(db, user.email, user.password, user.username)
-    created.terms_accepted_at = datetime.now(UTC)
-    created.privacy_accepted_at = datetime.now(UTC)
+    accepted_at = datetime.now(UTC)
+    created.terms_accepted_at = accepted_at
+    created.privacy_accepted_at = accepted_at
     created.terms_version = TERMS_HASH
     created.privacy_version = PRIVACY_HASH
     token = _set_verification_token(created)
     db.add(created)
+    record_legal_acceptances(
+        db,
+        created,
+        accepted_at=accepted_at,
+        terms_version=TERMS_HASH,
+        privacy_version=PRIVACY_HASH,
+    )
     db.commit()
     db.refresh(created)
     display = user.username or user.email.split("@")[0]

@@ -5,5 +5,6 @@ from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.journal import JournalEntry
 from app.models.affirmation import AffirmationEntry
+from app.models.legal_acceptance import LegalAcceptance
 
-__all__ = ["User", "Account", "Transaction", "JournalEntry"]
+__all__ = ["User", "Account", "Transaction", "JournalEntry", "AffirmationEntry", "LegalAcceptance"]

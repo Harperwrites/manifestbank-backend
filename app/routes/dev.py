@@ -11,7 +11,9 @@ from app.crud.crud_user import create_user, get_user_by_email, get_user_by_usern
 from app.db.session import get_db
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
 from app.models.ether import EtherSyncRequest, Profile
+from app.models.legal_acceptance import LegalAcceptance
 from app.models.user import User
+from app.services.legal_acceptance import record_legal_acceptances
 
 router = APIRouter(prefix="/dev", tags=["dev"])
 
@@ -26,6 +28,11 @@ class SeedUserRequest(BaseModel):
 
 class SyncAllRequest(BaseModel):
     admin_email: str | None = None
+
+
+class LegalHistoryQuery(BaseModel):
+    email: str | None = None
+    user_id: int | None = None
 
 
 @router.post("/seed-user")
@@ -56,6 +63,13 @@ def seed_user(
     user.privacy_accepted_at = now
     user.terms_version = TERMS_HASH
     user.privacy_version = PRIVACY_HASH
+    record_legal_acceptances(
+        db,
+        user,
+        accepted_at=now,
+        terms_version=TERMS_HASH,
+        privacy_version=PRIVACY_HASH,
+    )
     if payload.verified:
         user.email_verified = True
         user.email_verification_token = None
@@ -180,4 +194,55 @@ def sync_all_profiles(
         "synced": created,
         "updated": updated,
         "total_profiles": len(profiles),
+    }
+
+
+@router.post("/legal-history")
+def legal_history(
+    payload: LegalHistoryQuery,
+    db: Session = Depends(get_db),
+    x_dev_seed: str | None = Header(default=None),
+):
+    if not settings.DEV_SEED_SECRET:
+        raise HTTPException(status_code=404, detail="Not found")
+    if x_dev_seed != settings.DEV_SEED_SECRET:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid dev seed secret")
+
+    user = None
+    if payload.user_id is not None:
+        user = db.query(User).filter(User.id == payload.user_id).first()
+    elif payload.email:
+        user = db.query(User).filter(func.lower(User.email) == payload.email.strip().lower()).first()
+    else:
+        raise HTTPException(status_code=400, detail="Provide email or user_id")
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    history = (
+        db.query(LegalAcceptance)
+        .filter(LegalAcceptance.user_id == user.id)
+        .order_by(LegalAcceptance.accepted_at.asc(), LegalAcceptance.document_type.asc())
+        .all()
+    )
+
+    return {
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "terms_accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+            "privacy_accepted_at": user.privacy_accepted_at.isoformat() if user.privacy_accepted_at else None,
+            "terms_version": user.terms_version,
+            "privacy_version": user.privacy_version,
+        },
+        "history": [
+            {
+                "id": row.id,
+                "document_type": row.document_type,
+                "version": row.version,
+                "accepted_at": row.accepted_at.isoformat(),
+            }
+            for row in history
+        ],
     }

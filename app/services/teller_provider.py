@@ -621,6 +621,8 @@ def _should_copyedit(text: str, short_mode: bool = False) -> bool:
         return False
     if _is_retry_placeholder(stripped):
         return False
+    if re.search(r"(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+\.\s|\*\*(?:script|story|shorter script|2-minute reset|30-second reset)\*\*)", stripped, re.I):
+        return False
     if short_mode and len(stripped) < 24:
         return False
     return True
@@ -844,6 +846,14 @@ def _is_shorten_request(message: str) -> bool:
         "shorter",
         "even shorter",
         "shorter please",
+        "short",
+        "short please",
+        "brief",
+        "brief please",
+        "one line",
+        "one-line",
+        "one line please",
+        "one-line please",
         "short version",
         "make it shorter",
         "compress it",
@@ -875,6 +885,47 @@ def _is_money_manifestation_topic(text: str) -> bool:
         "prosperity",
     )
     return any(keyword in normalized for keyword in keywords)
+
+
+def _assistant_recently_requested_affirmation_style(text: str) -> bool:
+    lowered = (text or "").lower()
+    if "affirmation" not in lowered:
+        return False
+    markers = (
+        "would you prefer",
+        "brief",
+        "one-line",
+        "one line",
+        "short",
+        "calm affirmations",
+        "confidence affirmations",
+        "focus affirmations",
+        "financial affirmations",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _extract_affirmation_topic(message: str, history: list[dict[str, str]] | None = None) -> str:
+    normalized = _normalize_brief_text(message)
+    if any(token in normalized for token in ("finance", "financial", "money", "wealth", "income", "abundance")):
+        return "more money"
+    if "confidence" in normalized or "confident" in normalized:
+        return "confidence"
+    if "focus" in normalized or "clarity" in normalized:
+        return "focus"
+    if "calm" in normalized or "peace" in normalized or "grounded" in normalized:
+        return "calm"
+    recent_focus = _recent_substantive_user_focus(history)
+    if recent_focus:
+        cleaned_recent = _normalize_topic_for_content(recent_focus, "")
+        if cleaned_recent and "affirmation" not in cleaned_recent:
+            return cleaned_recent
+    if _assistant_recently_requested_affirmation_style(_recent_assistant_context(history)):
+        return "calm"
+    cleaned = _normalize_topic_for_content(_clean_subject(_extract_primary_prompt_focus(message)), "")
+    if cleaned and "affirmation" not in cleaned:
+        return cleaned
+    return "more money"
 
 
 def _is_short_followup(message: str) -> bool:
@@ -1215,6 +1266,12 @@ def _title_case_topic(topic: str) -> str:
 
 def _canonical_content_topic(topic: str | None) -> str:
     normalized = _normalize_topic_for_content(topic, "more money")
+    if any(phrase in normalized for phrase in ("calm", "peace", "grounded", "regulation", "regulated")):
+        return "calm"
+    if any(phrase in normalized for phrase in ("confidence", "confident", "self trust", "self-trust")):
+        return "confidence"
+    if any(phrase in normalized for phrase in ("focus", "clarity", "concentration")):
+        return "focus"
     if any(phrase in normalized for phrase in ("wealth identity",)):
         return "wealth identity"
     if any(phrase in normalized for phrase in ("new paying signature members", "signature member", "signature members", "paying signature member", "paying members", "member sign ups", "member signups")):
@@ -1228,8 +1285,12 @@ def _canonical_content_topic(topic: str | None) -> str:
 
 def _micro_intent_for_topic(topic: str | None) -> str:
     normalized = _normalize_topic_for_content(topic, "more money")
+    if any(term in normalized for term in ("calm", "peace", "grounded", "regulation")):
+        return "calm"
     if any(term in normalized for term in ("confidence", "self trust", "trust")):
         return "confidence"
+    if any(term in normalized for term in ("focus", "clarity", "concentration")):
+        return "focus"
     if any(term in normalized for term in ("income growth", "income", "revenue", "sales", "more money")):
         return "income_growth"
     if any(term in normalized for term in ("conversion", "sign ups", "signups", "members", "commit")):
@@ -1793,6 +1854,48 @@ def _affirmation_lines_for_topic(
     topic = _canonical_content_topic(topic)
     flavor = _micro_intent_for_topic(topic)
     variants: dict[str, list[list[str]]] = {
+        "calm": [
+            [
+                "I can feel calm without losing momentum.",
+                "My body does not need urgency to make a clear decision.",
+                "I let steadiness lead this moment.",
+                "I return to myself before I respond.",
+            ],
+            [
+                "I can slow down and still move well.",
+                "Calm helps me see what actually matters.",
+                "I release pressure that does not belong to this moment.",
+                "I trust grounded decisions more than rushed ones.",
+            ],
+        ],
+        "confidence": [
+            [
+                "I trust myself to handle what is in front of me.",
+                "My voice gets clearer when I stop shrinking it.",
+                "I back my decisions with steadier follow-through.",
+                "Confidence grows as I keep showing up cleanly.",
+            ],
+            [
+                "I do not need to overprove my value.",
+                "I can take up space without apologizing for it.",
+                "I trust what I know and move on it directly.",
+                "My confidence gets stronger through repetition.",
+            ],
+        ],
+        "focus": [
+            [
+                "I give my attention to the task that changes the result.",
+                "I can return to the important thing without drama.",
+                "Focus becomes easier when I remove what scatters me.",
+                "I let one clear step lead the next one.",
+            ],
+            [
+                "I stay with what matters long enough for it to move.",
+                "I do not need ten priorities at once.",
+                "I let clarity simplify my next decision.",
+                "My attention works best when I keep it deliberate.",
+            ],
+        ],
         "more money": [
             [
                 "I receive money through offers people are ready to buy.",
@@ -2192,6 +2295,11 @@ def _classify_content_intent(message: str, history: list[dict[str, str]] | None 
     normalized = _normalize_brief_text(message)
     if not normalized:
         return "unclear"
+    if _assistant_recently_requested_affirmation_style(_recent_assistant_context(history)) and (
+        _is_shorten_request(message)
+        or normalized in {"brief", "short", "calm", "confidence", "focus", "finances", "financial", "money"}
+    ):
+        return "request_affirmations"
     if _is_greeting_only(message):
         return "greeting"
     if _is_another_variant_request(message):
@@ -2789,11 +2897,12 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
             return _build_script_response(default_topic, perspective="first_person", history=history, variant_hint="first_person")
         return _build_script_response(default_topic, history=history, variant_hint="requested")
     if requested_artifact == "affirmations":
+        affirmation_topic = _extract_affirmation_topic(message, history)
         if current_intent == "shorten":
-            return _build_affirmation_set(default_topic, shorter=True, history=history, variant_hint="shorter")
+            return _build_affirmation_set(affirmation_topic, shorter=True, history=history, variant_hint="shorter")
         if current_intent == "strengthen":
-            return _build_affirmation_set(default_topic, stronger=True, history=history, variant_hint="stronger")
-        return _build_affirmation_set(default_topic, history=history, variant_hint="requested")
+            return _build_affirmation_set(affirmation_topic, stronger=True, history=history, variant_hint="stronger")
+        return _build_affirmation_set(affirmation_topic, history=history, variant_hint="requested")
     if requested_artifact == "reset":
         return _build_money_reset_reply(default_topic, history=history, variant_hint="requested")
     if "relaxing into wealth" in normalized:
@@ -2819,7 +2928,7 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
     if current_intent == "request_script":
         return _build_script_response(default_topic, history=history, variant_hint="requested")
     if current_intent == "request_affirmations":
-        return _build_affirmation_set(default_topic, history=history, variant_hint="requested")
+        return _build_affirmation_set(_extract_affirmation_topic(message, history), history=history, variant_hint="requested")
     if _is_daily_set_followup(message):
         return _build_money_daily_set_reply(default_topic)
     if current_intent == "request_reset":
@@ -3238,12 +3347,11 @@ def _extract_response_text(data: dict[str, Any]) -> str:
                 parts.append(content)
             elif isinstance(content, list):
                 for block in content:
-                    if isinstance(block, dict) and block.get("type") == "output_text":
-                        text = block.get("text")
-                        if text:
-                            parts.append(text)
-                    if isinstance(block, dict) and block.get("text"):
-                        parts.append(block.get("text"))
+                    if not isinstance(block, dict):
+                        continue
+                    text = block.get("text")
+                    if isinstance(text, str) and text:
+                        parts.append(text)
         if parts:
             return "\n".join(parts)
     message = data.get("message")
@@ -3365,6 +3473,28 @@ def _remove_repeated_clauses(text: str) -> str:
     return ". ".join(kept)
 
 
+def _collapse_repeated_prompt_fragments(text: str) -> str:
+    if not text:
+        return text
+    compact = re.sub(r"\s+", " ", text).strip()
+    repeated_or = re.match(r"(?is)^(.{12,}?)\s+or\s+\1(?:\s+or)?\??$", compact)
+    if repeated_or:
+        return repeated_or.group(1).strip().rstrip(" ,;:") + "?"
+    repeated = re.match(r"(?is)^(.{12,}?)\s+\1\??$", compact)
+    if repeated:
+        return repeated.group(1).strip().rstrip(" ,;:") + ("?" if compact.endswith("?") else "")
+    return text
+
+
+def _remove_off_brand_filler(text: str) -> str:
+    if not text:
+        return text
+    cleaned = re.sub(r"(?i)(^|(?<=[.!?]\s))nice\.\s*", r"\1Good. ", text)
+    cleaned = re.sub(r"(?i)(^|(?<=[.!?]\s))sweet\.\s*", r"\1", cleaned)
+    cleaned = re.sub(r"(?i)\bfresh set\b", "new set", cleaned)
+    return cleaned
+
+
 def _strip_manifestation_checks(text: str) -> str:
     if not text:
         return text
@@ -3442,7 +3572,7 @@ def _normalize_punctuation(text: str) -> str:
     cleaned = re.sub(r"(?i)\b(next steps|choose one|pick one|options|try this)\s*;", r"\1:", text)
     cleaned = re.sub(r";\s*(?=[A-Z#*\-])", ". ", cleaned)
     cleaned = re.sub(r";\s*", ", ", cleaned)
-    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\bi\b", "I", cleaned)
     cleaned = re.sub(r"(?<=\w)\s*\n\s*(?=[a-zA-Z])", " ", cleaned)
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
@@ -3521,7 +3651,8 @@ def _stop_after_clarifying_question(text: str) -> str:
         "should i",
         "would it help",
     ]
-    if not any(marker in lower for marker in question_starters):
+    stripped_lower = lower.strip()
+    if not any(stripped_lower.startswith(marker) or stripped_lower.startswith(f"good. {marker}") for marker in question_starters):
         return text
     question_match = re.search(r".*?\?(?:\s|$)", text, re.S)
     if not question_match:
@@ -3553,7 +3684,7 @@ def _enforce_markdown_structure(text: str) -> str:
     # Normalize duplicated "Insight" labels
     text = re.sub(r"^(Insight\s*\n)+", "", text, flags=re.I).strip()
     text = re.sub(r"^##\s*Insight\s*\nInsight\s*\n", "## Insight\n", text, flags=re.I).strip()
-    has_required = "## Insight" in text and "## Reflection" in text
+    has_required = "## Insight" in text and "## Key Points" in text and "## Reflection" in text
     if has_required:
         return text
 
@@ -3590,27 +3721,60 @@ def _enforce_markdown_structure(text: str) -> str:
 
     lines = ["## Insight", intro, ""]
     if bullets:
-        lines.extend([f"- {b}" for b in bullets])
+        lines.extend(["## Key Points", "", *[f"- {b}" for b in bullets]])
         lines.append("")
+    elif len(sentences) > 2:
+        fallback_points = [s.rstrip(".") for s in sentences[1:4] if not s.endswith("?")]
+        if fallback_points:
+            lines.extend(["## Key Points", "", *[f"- {point}" for point in fallback_points], ""])
     if reflection:
         lines.extend(["## Reflection", reflection])
     return "\n".join(lines).strip()
 
 
+def _sentence_count(text: str) -> int:
+    if not text:
+        return 0
+    return len([part for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part.strip()])
+
+
 def _light_cleanup(text: str) -> str:
     if not text:
         return text
-    cleaned = _normalize_punctuation(text)
+    cleaned = _collapse_repeated_prompt_fragments(text)
+    cleaned = _normalize_punctuation(cleaned)
+    cleaned = _remove_off_brand_filler(cleaned)
     cleaned = _strip_unsupported_action_offers(cleaned)
     cleaned = _remove_repeated_sentences(cleaned)
     cleaned = _remove_near_duplicate_lines(cleaned)
     cleaned = _remove_repeated_clauses(cleaned)
     cleaned = _strip_disclaimers(cleaned)
     cleaned = _stop_after_clarifying_question(cleaned)
-    if len(cleaned) > 180:
+    if _sentence_count(cleaned) > 2:
         cleaned = _enforce_markdown_structure(cleaned)
     cleaned = cleaned.strip()
     return cleaned
+
+
+def _should_use_local_rescue(message: str, history: list[dict[str, str]] | None = None) -> bool:
+    intent = _classify_content_intent(message, history)
+    if intent in {
+        "request_affirmations",
+        "alternate_affirmations",
+        "shorten",
+        "strengthen",
+        "rewrite",
+        "approve_rewrite",
+        "shift_first_person",
+    }:
+        if intent in {"shorten", "strengthen", "rewrite", "approve_rewrite", "shift_first_person"}:
+            return _detect_recent_content_artifact(history) != "none"
+        return True
+    if intent == "another_variant":
+        return _detect_recent_content_artifact(history) in {"affirmations", "script", "story"}
+    if _assistant_recently_requested_affirmation_style(_recent_assistant_context(history)) and _is_short_followup(message):
+        return True
+    return False
 
 
 async def generate_teller_reply(
@@ -3622,6 +3786,8 @@ async def generate_teller_reply(
     repeat_count = _get_repeat_count(message, history)
 
     if _should_short_circuit_neutral_assist(message, history):
+        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+    if _should_use_local_rescue(message, history):
         return False, _light_cleanup(_local_rescue_reply(message, history=history))
 
     provider = (settings.TELLER_PROVIDER or "stub").lower()
@@ -3650,6 +3816,8 @@ async def stream_teller_reply(
     repeat_count = _get_repeat_count(message, history)
 
     if _should_short_circuit_neutral_assist(message, history):
+        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+    if _should_use_local_rescue(message, history):
         return False, _light_cleanup(_local_rescue_reply(message, history=history))
 
     provider = (settings.TELLER_PROVIDER or "stub").lower()

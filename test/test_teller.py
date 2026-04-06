@@ -918,6 +918,45 @@ async def test_teller_thread_delete_removes_associated_audit_rows(client, db):
 
 
 @pytest.mark.asyncio
+async def test_teller_deposit_with_specified_account_only_asks_for_confirmation(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "tellerdepositone")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    created = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+    assert created.status_code == 200
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "I'd like to deposit $15,000 into Wealth Builder"}, headers=headers)
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert "Confirm deposit $15,000.00 into “Wealth Builder”?" in content
+    assert "Which account" not in content
+
+
+@pytest.mark.asyncio
+async def test_teller_deposit_without_account_then_account_followup_then_yes(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "tellerdeposittwo")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    created = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+    assert created.status_code == 200
+
+    first = await client.post("/teller/chat", json={"thread_id": None, "message": "I'd like to deposit $15,000"}, headers=headers)
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert "Which account should I use?" in first.json()["assistant_message"]["content"]
+
+    second = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Wealth builder please"}, headers=headers)
+    assert second.status_code == 200
+    assert "Confirm deposit $15,000.00 into “Wealth Builder”?" in second.json()["assistant_message"]["content"]
+
+    third = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Yes"}, headers=headers)
+    assert third.status_code == 200
+    assert "Done. I deposited $15,000.00 into “Wealth Builder”." in third.json()["assistant_message"]["content"]
+
+
+@pytest.mark.asyncio
 async def test_teller_general_balance_shows_all_balances_for_balance_keyword(client, db):
     rate_limiter.buckets.clear()
     token = await _safe_login(client, db, "teller_balance_keyword")
@@ -979,6 +1018,32 @@ async def test_teller_specific_account_balance_shows_only_named_account(client, 
             assert "**Checking balance**" in content
             assert "- Checking: $900.00" in content
             assert "Travel" not in content
+
+
+@pytest.mark.asyncio
+async def test_teller_balance_after_deposit_reflects_updated_number(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "tellerbalfresh")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    created = await client.post("/accounts", json={"name": "Savings", "account_type": "personal", "currency": "USD"}, headers=headers)
+    assert created.status_code == 200
+
+    first = await client.post("/teller/chat", json={"thread_id": None, "message": "deposit 300 savings"}, headers=headers)
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert "Confirm deposit $300.00 into “Savings”?" in first.json()["assistant_message"]["content"]
+
+    second = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "yes"}, headers=headers)
+    assert second.status_code == 200
+    assert "New balance: $300.00." in second.json()["assistant_message"]["content"]
+
+    third = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "what's my balance?"}, headers=headers)
+    assert third.status_code == 200
+    content = third.json()["assistant_message"]["content"]
+    assert "**Your account balances**" in content
+    assert "- Savings: $300.00" in content
+    assert "**Total:** $300.00" in content
 
 
 @pytest.mark.asyncio

@@ -5,9 +5,11 @@ from app.services import teller_provider
 from app.services.teller_provider import (
     DEFAULT_TELLER_PROMPT,
     _enforce_markdown_structure,
+    _extract_response_text,
     _extract_stream_completed_text,
     _get_repeat_count,
     _is_retry_placeholder,
+    _light_cleanup,
     _normalize_punctuation,
     _remove_repeated_sentences,
     _response_unsupported_param,
@@ -84,6 +86,20 @@ def test_extract_stream_completed_text_supports_content_part_and_output_item_don
     assert _extract_stream_completed_text(item_event) == "Hello again."
 
 
+def test_extract_response_text_dedupes_output_text_blocks_from_responses_api():
+    payload = {
+        "output": [
+            {
+                "content": [
+                    {"type": "output_text", "text": "Would you prefer brief, one-line calm affirmations or?"},
+                ]
+            }
+        ]
+    }
+
+    assert _extract_response_text(payload) == "Would you prefer brief, one-line calm affirmations or?"
+
+
 def test_get_persona_uses_compact_default_prompt():
     name, prompt = get_persona()
 
@@ -139,6 +155,41 @@ def test_normalize_punctuation_fixes_sentence_breaks_across_lines():
     cleaned = _normalize_punctuation(source)
 
     assert cleaned == "I can help with that. What direction feels best next?"
+
+
+def test_light_cleanup_enforces_markdown_on_long_plaintext_coaching_reply():
+    source = (
+        "Breathing is one of the fastest ways to settle your system. "
+        "Start with a slower exhale so your body stops bracing. "
+        "Then keep your attention on one clear next step. "
+        "What would help you stay with that today?"
+    )
+
+    cleaned = _light_cleanup(source)
+
+    assert "## Insight" in cleaned
+    assert "## Key Points" in cleaned
+    assert "## Reflection" in cleaned
+    assert "- Start with a slower exhale so your body stops bracing" in cleaned or "- Then keep your attention on one clear next step" in cleaned
+
+
+def test_light_cleanup_keeps_short_confirmations_concise():
+    source = "Done. I deposited $300.00 into “Miracles”. New balance: $1,300.00."
+
+    cleaned = _light_cleanup(source)
+
+    assert cleaned == source
+    assert "## Insight" not in cleaned
+
+
+def test_light_cleanup_removes_off_brand_filler():
+    source = "Nice. Here's a fresh set. Sweet."
+
+    cleaned = _light_cleanup(source)
+
+    assert "Nice." not in cleaned
+    assert "Sweet." not in cleaned
+    assert "fresh set" not in cleaned.lower()
 
 
 def test_retry_placeholder_detection_handles_punctuation_variants():
@@ -251,6 +302,76 @@ async def test_stream_teller_reply_refines_affirmations_without_restarting_menu(
     assert cached is False
     assert "affirmation" in reply.lower()
     assert "short script" not in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_generic_affirmations_use_dedicated_handler(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, reply = await generate_teller_reply(778001, "affirmations please")
+
+    assert cached is False
+    assert "- " in reply
+    assert "I’m here. Please try again." not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_valid_brief_followup_returns_affirmations_not_fallback(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    history = [
+        {
+            "role": "assistant",
+            "content": "Would you prefer brief, one-line calm affirmations or a longer set?",
+        },
+    ]
+
+    cached, reply = await generate_teller_reply(778002, "brief", history=history)
+
+    assert cached is False
+    assert "- " in reply
+    assert "calm" in reply.lower() or "steady" in reply.lower()
+    assert "I’m here. Please try again." not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmations_calm_then_brief_flow(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    first_cached, first_reply = await generate_teller_reply(778003, "affirmations for calm")
+    assert first_cached is False
+    assert "- " in first_reply
+
+    history = [
+        {"role": "user", "content": "affirmations for calm"},
+        {"role": "assistant", "content": first_reply},
+    ]
+    second_cached, second_reply = await generate_teller_reply(778003, "brief", history=history)
+
+    assert second_cached is False
+    assert second_reply.count("- ") <= 2
+    assert "I’m here. Please try again." not in second_reply
 
 
 @pytest.mark.asyncio

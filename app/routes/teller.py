@@ -116,6 +116,22 @@ REPEAT_LAST_ACTION_WORDS = {
     "repeat that withdrawal",
 }
 
+GENERAL_BALANCE_PHRASES = {
+    "balance",
+    "balances",
+    "what's my balance",
+    "what is my balance",
+    "show my balance",
+    "show my balances",
+    "what are my balances",
+    "how much do i have",
+    "show my account balances",
+    "what's in my accounts",
+    "what is in my accounts",
+    "show everything",
+    "how much is in there",
+}
+
 
 def _is_confirm_message(message: str) -> bool:
     return _classify_confirmation_intent(message) == "approve"
@@ -1145,6 +1161,94 @@ def _format_accounts(accounts: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _is_balance_request(lower_msg: str) -> bool:
+    if not lower_msg:
+        return False
+    if any(phrase in lower_msg for phrase in GENERAL_BALANCE_PHRASES):
+        return True
+    if re.search(r"\b(balance|balances)\b", lower_msg):
+        return True
+    if re.search(r"\bwhat(?:'s| is)\s+in\b", lower_msg):
+        return True
+    if re.search(r"\bhow much is in\b", lower_msg):
+        return True
+    return False
+
+
+def _is_general_balance_request(lower_msg: str) -> bool:
+    if not lower_msg:
+        return False
+    if any(phrase in lower_msg for phrase in GENERAL_BALANCE_PHRASES):
+        return True
+    if re.fullmatch(r"\s*what(?:'s| is)\s+my\s+balance\??\s*", lower_msg):
+        return True
+    if re.fullmatch(r"\s*what\s+are\s+my\s+balances\??\s*", lower_msg):
+        return True
+    if re.fullmatch(r"\s*show\s+my\s+balances?\s*", lower_msg):
+        return True
+    if re.fullmatch(r"\s*how\s+much\s+do\s+i\s+have\??\s*", lower_msg):
+        return True
+    return False
+
+
+def _format_balance_summary(accounts: list[dict]) -> str:
+    if not accounts:
+        return (
+            "**Your account balances**\n\n"
+            "You don’t have any active accounts yet.\n\n"
+            "**Next step**\n\n"
+            "- Say “Create a new account” to open one."
+        )
+
+    grouped: dict[str, list[dict]] = {}
+    for acct in accounts:
+        currency = (acct.get("currency") or "USD").upper()
+        grouped.setdefault(currency, []).append(acct)
+
+    if len(grouped) == 1:
+        currency, items = next(iter(grouped.items()))
+        total = sum(Decimal(str(item["balance"])) for item in items)
+        lines = ["**Your account balances**", ""]
+        for acct in items:
+            lines.append(f"- {acct['name']}: {_format_money(acct['balance'], currency)}")
+        lines.extend(["", f"**Total:** {_format_money(total, currency)}"])
+        return "\n".join(lines)
+
+    lines = ["**Your account balances**", ""]
+    first_group = True
+    for currency in sorted(grouped.keys()):
+        items = grouped[currency]
+        subtotal = sum(Decimal(str(item["balance"])) for item in items)
+        if not first_group:
+            lines.append("")
+        lines.append(f"**{currency} accounts**")
+        lines.append("")
+        for acct in items:
+            lines.append(f"- {acct['name']}: {_format_money(acct['balance'], currency)}")
+        lines.append("")
+        lines.append(f"**{currency} subtotal:** {_format_money(subtotal, currency)}")
+        first_group = False
+    return "\n".join(lines)
+
+
+def _format_single_balance(account: dict) -> str:
+    currency = account.get("currency") or "USD"
+    return (
+        f"**{account['name']} balance**\n\n"
+        f"- {account['name']}: {_format_money(account['balance'], currency)}"
+    )
+
+
+def _should_ask_account_for_balance(lower_msg: str, account_match: dict | None) -> bool:
+    if account_match or _is_general_balance_request(lower_msg):
+        return False
+    if not _is_balance_request(lower_msg):
+        return False
+    if "balances" in lower_msg or "accounts" in lower_msg or "everything" in lower_msg:
+        return False
+    return True
+
+
 def require_signature(user: User) -> None:
     if user.role == "admin":
         return
@@ -1184,7 +1288,7 @@ def _should_use_standard_teller_chat(
     if lower_msg in CONFIRM_WORDS or lower_msg in CANCEL_WORDS:
         return True
 
-    return _is_explicit_account_request(lower_msg)
+    return _is_explicit_account_request(lower_msg) or _is_balance_request(lower_msg)
 
 
 def _is_explicit_account_request(lower_msg: str) -> bool:
@@ -3406,6 +3510,25 @@ async def chat(
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
 
     # Lightweight account/balance awareness for teller actions
+    if _is_balance_request(lower_msg):
+        account_match = _match_account(lower_msg, accounts)
+        if account_match:
+            reply = _format_single_balance(account_match)
+        elif _is_general_balance_request(lower_msg):
+            reply = _format_balance_summary(accounts)
+        elif _should_ask_account_for_balance(lower_msg, account_match):
+            reply = "Which account do you want to check?\n" + _format_accounts(accounts)
+        else:
+            reply = _format_balance_summary(accounts)
+
+        assistant_message = TellerMessage(thread_id=thread.id, role="assistant", content=reply)
+        thread.updated_at = datetime.now(UTC)
+        db.add(assistant_message)
+        db.add(thread)
+        db.commit()
+        db.refresh(assistant_message)
+        return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
+
     if _is_explicit_account_request(lower_msg) and ("account" in lower_msg or "accounts" in lower_msg or "balance" in lower_msg):
         reply = _format_accounts(accounts)
         assistant_message = TellerMessage(thread_id=thread.id, role="assistant", content=reply)

@@ -880,6 +880,108 @@ async def test_teller_account_lists_use_native_currency_balances(client, db):
 
 
 @pytest.mark.asyncio
+async def test_teller_general_balance_shows_all_balances_for_balance_keyword(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_balance_keyword")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    checking = await client.post("/accounts", json={"name": "Checking", "account_type": "personal", "currency": "USD"}, headers=headers)
+    savings = await client.post("/accounts", json={"name": "Savings", "account_type": "personal", "currency": "USD"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": checking.json()["id"], "direction": "credit", "amount": "450.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": savings.json()["id"], "direction": "credit", "amount": "1200.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "balance"}, headers=headers)
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert "**Your account balances**" in content
+    assert "- Checking: $450.00" in content
+    assert "- Savings: $1,200.00" in content
+    assert "**Total:** $1,650.00" in content
+    assert "Which account" not in content
+
+
+@pytest.mark.asyncio
+async def test_teller_general_balance_handles_common_broad_utterances(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_balance_broad")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    travel = await client.post("/accounts", json={"name": "Travel", "account_type": "personal", "currency": "USD"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": travel.json()["id"], "direction": "credit", "amount": "300.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    for prompt in ["what's my balance?", "show my balances", "how much do I have?", "show everything"]:
+        response = await client.post("/teller/chat", json={"thread_id": None, "message": prompt}, headers=headers)
+        assert response.status_code == 200
+        content = response.json()["assistant_message"]["content"]
+        assert "**Your account balances**" in content
+        assert "- Travel: $300.00" in content
+        assert "Which account" not in content
+
+
+@pytest.mark.asyncio
+async def test_teller_specific_account_balance_shows_only_named_account(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_balance_single")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    checking = await client.post("/accounts", json={"name": "Checking", "account_type": "personal", "currency": "USD"}, headers=headers)
+    travel = await client.post("/accounts", json={"name": "Travel", "account_type": "personal", "currency": "USD"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": checking.json()["id"], "direction": "credit", "amount": "900.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": travel.json()["id"], "direction": "credit", "amount": "300.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    for prompt in ["what's in travel", "checking balance", "how much is in travel", "show travel account balance"]:
+        response = await client.post("/teller/chat", json={"thread_id": None, "message": prompt}, headers=headers)
+        assert response.status_code == 200
+        content = response.json()["assistant_message"]["content"]
+        if "travel" in prompt:
+            assert "**Travel balance**" in content
+            assert "- Travel: $300.00" in content
+            assert "Checking" not in content
+        else:
+            assert "**Checking balance**" in content
+            assert "- Checking: $900.00" in content
+            assert "Travel" not in content
+
+
+@pytest.mark.asyncio
+async def test_teller_balance_no_accounts_state_is_graceful(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_balance_empty")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "show my balances"}, headers=headers)
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert "**Your account balances**" in content
+    assert "You don’t have any active accounts yet." in content
+    assert "Create a new account" in content
+
+
+@pytest.mark.asyncio
+async def test_teller_balance_multi_currency_groups_without_combined_total(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_balance_multi")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    usd = await client.post("/accounts", json={"name": "Checking", "account_type": "personal", "currency": "USD"}, headers=headers)
+    gbp = await client.post("/accounts", json={"name": "Uk Motion", "account_type": "operating", "currency": "GBP"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": usd.json()["id"], "direction": "credit", "amount": "450.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": gbp.json()["id"], "direction": "credit", "amount": "190500.00", "currency": "GBP", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "what are my balances?"}, headers=headers)
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert "**Your account balances**" in content
+    assert "**USD accounts**" in content
+    assert "- Checking: $450.00" in content
+    assert "**USD subtotal:** $450.00" in content
+    assert "**GBP accounts**" in content
+    assert "- Uk Motion: £190,500.00" in content
+    assert "**GBP subtotal:** £190,500.00" in content
+    assert "**Total:**" not in content
+
+
+@pytest.mark.asyncio
 async def test_teller_handles_deposit_then_transfer_as_sequential_intents(client, db):
     rate_limiter.buckets.clear()
     token = await _safe_login(client, db, "teller_multi")

@@ -190,6 +190,18 @@ def test_light_cleanup_removes_off_brand_filler():
     assert "Nice." not in cleaned
     assert "Sweet." not in cleaned
     assert "fresh set" not in cleaned.lower()
+    assert "new set" in cleaned.lower()
+
+
+def test_light_cleanup_collapses_duplicated_followup_question_text():
+    source = (
+        "Would you prefer brief, one-line calm affirmations or "
+        "Would you prefer brief, one-line calm affirmations or?"
+    )
+
+    cleaned = _light_cleanup(source)
+
+    assert cleaned == "Would you prefer brief, one-line calm affirmations?"
 
 
 def test_retry_placeholder_detection_handles_punctuation_variants():
@@ -346,6 +358,8 @@ async def test_generate_teller_reply_valid_brief_followup_returns_affirmations_n
     assert "- " in reply
     assert "calm" in reply.lower() or "steady" in reply.lower()
     assert "I’m here. Please try again." not in reply
+    assert "Would you prefer brief, one-line calm affirmations or" not in reply
+    assert "or Would you prefer brief, one-line calm affirmations or" not in reply
 
 
 @pytest.mark.asyncio
@@ -372,6 +386,159 @@ async def test_generate_teller_reply_affirmations_calm_then_brief_flow(monkeypat
     assert second_cached is False
     assert second_reply.count("- ") <= 2
     assert "I’m here. Please try again." not in second_reply
+    assert "Would you prefer" not in second_reply
+    assert second_reply.count("?") <= 1
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmations_sequence_has_no_duplicate_fragments(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    first_cached, first_reply = await generate_teller_reply(778008, "Affirmations")
+    assert first_cached is False
+    assert "I’m here. Please try again." not in first_reply
+
+    second_history = [
+        {"role": "user", "content": "Affirmations"},
+        {"role": "assistant", "content": "Would you prefer brief, one-line calm affirmations or a longer set?"},
+    ]
+    second_cached, second_reply = await generate_teller_reply(778008, "Calm", history=second_history)
+    assert second_cached is False
+    assert "I’m here. Please try again." not in second_reply
+
+    third_history = [
+        {"role": "user", "content": "Affirmations"},
+        {"role": "assistant", "content": "Would you prefer brief, one-line calm affirmations or a longer set?"},
+        {"role": "user", "content": "Calm"},
+        {"role": "assistant", "content": "Would you prefer brief, one-line calm affirmations or a longer set?"},
+    ]
+    third_cached, third_reply = await generate_teller_reply(778008, "brief", history=third_history)
+
+    assert third_cached is False
+    assert "- " in third_reply
+    assert "I’m here. Please try again." not in third_reply
+    assert "Would you prefer brief, one-line calm affirmations or" not in third_reply
+    assert "Would you prefer" not in third_reply
+    assert third_reply.count("?") <= 1
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_short_followup_variants_route_without_fallback(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    style_history = [
+        {
+            "role": "assistant",
+            "content": "Would you prefer brief, one-line calm affirmations or a longer set?",
+        },
+    ]
+
+    for message in ["brief", "short", "calm", "confidence"]:
+        cached, reply = await generate_teller_reply(778004, message, history=style_history)
+        assert cached is False
+        assert "I’m here. Please try again." not in reply
+        assert "A)" not in reply and "B)" not in reply and "C)" not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_direct_brief_calm_affirmations_needs_no_followup(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, reply = await generate_teller_reply(778005, "Give me brief calm affirmations")
+
+    assert cached is False
+    assert "- " in reply
+    assert "I’m here. Please try again." not in reply
+    assert "Confirm" not in reply
+    assert reply.count("?") <= 1
+    assert "A)" not in reply and "B)" not in reply and "C)" not in reply
+    assert "Would you prefer" not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmations_stays_premium_and_avoids_banned_words(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, reply = await generate_teller_reply(778006, "Affirmations please")
+
+    assert cached is False
+    lowered = reply.lower()
+    for banned in ["nice.", "sweet.", "fresh set", "tokens", "deals", "imagine", "imagined", "imaginative"]:
+        assert banned not in lowered
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_greeting_only_once_at_conversation_start(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_response(message, history=None, short_mode=False, repeat_count=0):
+        calls.append(message)
+        return "## Insight\nYou can check your balances directly.\n\n## Key Points\n- Checking: $450.00\n\n## Reflection\nWhat do you want to review next?"
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, greeting = await generate_teller_reply(778007, "hi")
+    assert cached is False
+    assert greeting == "Hi. What would you like to do?"
+
+    history = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": greeting},
+    ]
+    cached, second = await generate_teller_reply(778007, "check balances", history=history)
+    assert cached is False
+    assert "Hi." not in second
+    assert calls == ["check balances"]
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_generic_affirmations_asks_at_most_one_short_question(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, reply = await generate_teller_reply(778009, "Affirmations please")
+
+    assert cached is False
+    assert "A)" not in reply and "B)" not in reply and "C)" not in reply
+    assert reply.count("?") <= 1
 
 
 @pytest.mark.asyncio

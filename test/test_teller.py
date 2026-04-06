@@ -955,6 +955,11 @@ async def test_teller_deposit_without_account_then_account_followup_then_yes(cli
     assert third.status_code == 200
     assert "Done. I deposited $15,000.00 into “Wealth Builder”." in third.json()["assistant_message"]["content"]
 
+    fourth = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Yes"}, headers=headers)
+    assert fourth.status_code == 200
+    assert "Confirm deposit" not in fourth.json()["assistant_message"]["content"]
+    assert "Done. I deposited $15,000.00" not in fourth.json()["assistant_message"]["content"]
+
 
 @pytest.mark.asyncio
 async def test_teller_general_balance_shows_all_balances_for_balance_keyword(client, db):
@@ -986,13 +991,14 @@ async def test_teller_general_balance_handles_common_broad_utterances(client, db
     travel = await client.post("/accounts", json={"name": "Travel", "account_type": "personal", "currency": "USD"}, headers=headers)
     await client.post("/ledger/entries", json={"account_id": travel.json()["id"], "direction": "credit", "amount": "300.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
 
-    for prompt in ["what's my balance?", "show my balances", "how much do I have?", "show everything"]:
+    for prompt in ["what's my balance?", "show my balances", "how much do I have?", "show everything", "check balances", "check my balances", "Hi. Check balances please"]:
         response = await client.post("/teller/chat", json={"thread_id": None, "message": prompt}, headers=headers)
         assert response.status_code == 200
         content = response.json()["assistant_message"]["content"]
         assert "**Your account balances**" in content
         assert "- Travel: $300.00" in content
         assert "Which account" not in content
+        assert content.count("Hi.") <= 1
 
 
 @pytest.mark.asyncio

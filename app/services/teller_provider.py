@@ -888,6 +888,28 @@ def _is_money_manifestation_topic(text: str) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _is_manifest_money_request(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    return ("manifest" in normalized or "manifesting" in normalized) and any(
+        term in normalized for term in ("money", "income", "wealth")
+    )
+
+
+def _is_combined_money_support_request(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    return normalized in {
+        "help manifesting money",
+        "help manifest money",
+        "help me manifest money",
+        "help me with manifesting money",
+    }
+
+
+def _is_support_template_context(history: list[dict[str, str]] | None = None) -> bool:
+    recent = _recent_assistant_context(history).lower()
+    return "mindset:" in recent and "action:" in recent and "visualization:" in recent
+
+
 def _assistant_recently_requested_affirmation_style(text: str) -> bool:
     lowered = (text or "").lower()
     if "affirmation" not in lowered:
@@ -1138,6 +1160,21 @@ def _is_meditation_followup(message: str) -> bool:
 def _is_breathing_followup(message: str) -> bool:
     normalized = re.sub(r"[^\w\s-]", " ", (message or "").lower())
     return "breathing practice" in normalized or "breathing practices" in normalized or "breathwork" in normalized
+
+
+def _is_visualization_request(message: str) -> bool:
+    normalized = re.sub(r"[^\w\s-]", " ", (message or "").lower())
+    return "visualization" in normalized or "visualisation" in normalized
+
+
+def _is_mindset_tools_request(message: str) -> bool:
+    normalized = re.sub(r"[^\w\s-]", " ", (message or "").lower())
+    return "mindset tools" in normalized or normalized.strip() in {"mindset", "mindset tool", "mindset support"}
+
+
+def _is_short_daily_practices_request(message: str) -> bool:
+    normalized = re.sub(r"[^\w\s-]", " ", (message or "").lower())
+    return "short daily practices" in normalized or normalized.strip() in {"daily practices", "short practices", "daily practice"}
 
 
 def _is_story_request(message: str) -> bool:
@@ -2416,6 +2453,12 @@ def _classify_content_intent(message: str, history: list[dict[str, str]] | None 
         return "request_story"
     if _is_reset_followup(message):
         return "request_reset"
+    if _is_visualization_request(message):
+        return "request_visualization"
+    if _is_mindset_tools_request(message):
+        return "request_mindset_tools"
+    if _is_short_daily_practices_request(message):
+        return "request_daily_practices"
     if _is_affirmation_followup(message) or "affirmation" in normalized:
         return "request_affirmations"
     if _is_script_followup(message) or _is_short_script_followup(message):
@@ -2844,52 +2887,61 @@ def _build_rewrite_fulfillment_reply(history: list[dict[str, str]] | None = None
 
 
 def _build_money_manifestation_reply(message: str, history: list[dict[str, str]] | None = None) -> str:
-    topic = _clean_subject(_extract_primary_prompt_focus(message) or _clean_prompt_phrase(message)) or "more money"
-    prior_user = _recent_user_context(history)
-    prior_assistant = _recent_assistant_context(history)
-    prior_user_focus = _clean_subject(_extract_primary_prompt_focus(prior_user))
-    last_artifact = _detect_recent_content_artifact(history)
-    if _is_greeting_only(message):
-        return _build_neutral_assist_reply(message, history)
-    if _assistant_recently_offered_formats(prior_assistant):
-        subject = (prior_user_focus or topic or "money flowing in").lower()
-        if _is_daily_set_followup(message):
-            return _build_money_daily_set_reply(subject)
-        if _is_affirmation_followup(message):
-            return _build_money_affirmations_reply(subject, history=history)
-        if _is_short_script_followup(message):
-            return _build_money_script_reply(subject, history=history)
-        if _is_script_followup(message):
-            return _build_money_script_reply(subject, history=history)
-        if _is_reset_followup(message):
-            return _build_money_reset_reply(subject, history=history)
-    if _is_daily_set_followup(message):
-        return _build_money_daily_set_reply((prior_user_focus or topic or "money flowing in").lower())
-    if _is_affirmation_followup(message):
-        return _build_money_affirmations_reply((prior_user_focus or topic or "money flowing in").lower(), history=history)
-    if _is_short_script_followup(message) or _is_script_followup(message):
-        return _build_money_script_reply((prior_user_focus or topic or "money flowing in").lower(), history=history)
-    if _is_reset_followup(message):
-        return _build_money_reset_reply((prior_user_focus or topic or "money flowing in").lower(), history=history)
-    if _is_daily_set_followup(message) and (
-        _is_money_manifestation_topic(prior_user)
-        or _is_money_manifestation_topic(prior_assistant)
-    ):
-        subject = (prior_user_focus or topic or "money flowing in").lower()
-        return _build_money_daily_set_reply(subject)
-    if last_artifact == "none" and _is_short_followup(message) and (
-        _is_money_manifestation_topic(prior_user)
-        or _is_money_manifestation_topic(prior_assistant)
-    ):
-        return (
-            "More money usually moves through a smaller number of sharper decisions.\n\n"
-            "Pick the move that changes the number next: the offer, the ask, the price, or the follow-up. "
-            "If you want, I can turn that into a script, affirmations, or a reset."
+    if _is_combined_money_support_request(message):
+        return "\n".join(
+            [
+                "Mindset:",
+                "- Treat the number you want as something you can support with steadier decisions.",
+                "- Let receiving feel tied to clarity, follow-through, and visible value.",
+                "",
+                "Action:",
+                "- Choose one money move today: the offer, the ask, the price, or the follow-up.",
+                "- Finish the one step that would make income easier to receive this week.",
+                "",
+                "Visualization:",
+                "- Picture yourself completing that move calmly, sending it, and staying available for the result.",
+            ]
         )
     return (
         "More money usually shows up after a small number of sharper decisions, not a bigger amount of wishing.\n\n"
         "Pick the exact increase you want, tie it to a real source such as an offer, price change, client conversation, or follow-up, and move one of those today.\n\n"
         "If you want, I can turn that into a short script, a few affirmations, or a 2-minute reset."
+    )
+
+
+def _build_money_visualization_reply() -> str:
+    return "\n".join(
+        [
+            "- Sit still for one breath and picture the next paid move already finished.",
+            "- See yourself sending the message, making the offer, or naming the price without rushing.",
+            "- Let your body stay calm while you hold the result as something clean and reachable.",
+        ]
+    )
+
+
+def _build_money_mindset_tools_reply() -> str:
+    return "\n".join(
+        [
+            "- Replace urgency with one clear number and one clear source for it.",
+            "- Keep your attention on value, visibility, and follow-through instead of vague hoping.",
+            "- Let steadiness be the standard you return to before every money decision.",
+        ]
+    )
+
+
+def _build_short_daily_practices_reply() -> str:
+    return "\n".join(
+        [
+            "- Name the paid move that matters most today.",
+            "- Spend two quiet minutes clearing one money-related avoidance loop.",
+            "- End the day by noting one action that made receiving feel more supported.",
+            "",
+            "Speak-Aloud Anchor:",
+            "- I make money moves clearly, calmly, and on time.",
+            "",
+            "Next Step:",
+            "- Put one ten-minute money block on your calendar before you leave this conversation.",
+        ]
     )
 
 
@@ -3130,6 +3182,12 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
         return _build_praise_reply(history)
     if current_intent == "reflective":
         return _build_reflective_followup_reply(history)
+    if current_intent == "request_visualization":
+        return _build_money_visualization_reply()
+    if current_intent == "request_mindset_tools":
+        return _build_money_mindset_tools_reply()
+    if current_intent == "request_daily_practices":
+        return _build_short_daily_practices_reply()
     if current_intent == "another_variant" and last_artifact == "none":
         return _build_another_variant_clarify_reply()
     if _should_short_circuit_neutral_assist(message, history):
@@ -3192,6 +3250,20 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
             or _is_money_manifestation_topic(prior_assistant_text)
         )
     ):
+        if _is_combined_money_support_request(message) or _is_support_template_context(history):
+            if _is_visualization_request(message):
+                return _build_money_visualization_reply()
+            if _is_mindset_tools_request(message):
+                return _build_money_mindset_tools_reply()
+            if _is_short_daily_practices_request(message):
+                return _build_short_daily_practices_reply()
+            return _build_money_manifestation_reply("help manifesting money", history=history)
+        if _is_visualization_request(message):
+            return _build_money_visualization_reply()
+        if _is_mindset_tools_request(message):
+            return _build_money_mindset_tools_reply()
+        if _is_short_daily_practices_request(message):
+            return _build_short_daily_practices_reply()
         if "wealth identity" in normalized:
             return _build_wealth_identity_reply()
         return _build_money_manifestation_reply(message, history=history)
@@ -4040,6 +4112,8 @@ def _response_authority_kind(message: str, history: list[dict[str, str]] | None,
     lowered = (text or "").lower()
     if intent in {"praise", "reflective", "greeting", "reject", "unclear"}:
         return "general"
+    if intent in {"request_visualization", "request_mindset_tools", "request_daily_practices"}:
+        return "support"
     if (
         intent == "request_script"
         or artifact == "script"
@@ -4120,6 +4194,21 @@ def _sanitize_script_reply(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept).strip())
 
 
+def _sanitize_support_reply(text: str) -> str:
+    cleaned = _strip_legacy_response_phrases(text)
+    cleaned = _split_inline_dash_bullets(cleaned)
+    lines = [line.rstrip() for line in cleaned.splitlines()]
+    kept: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if kept and kept[-1] != "":
+                kept.append("")
+            continue
+        kept.append(stripped)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept).strip())
+
+
 async def _proof_final_reply(text: str, *, short_mode: bool = False) -> str:
     stripped = (text or "").strip()
     if not stripped:
@@ -4138,6 +4227,8 @@ async def _final_response_authority(
     if not stripped:
         return ""
     kind = _response_authority_kind(message, history, stripped)
+    if kind == "support":
+        return _sanitize_support_reply(stripped)
     if kind == "script":
         return _sanitize_script_reply(stripped)
     if kind == "affirmations":
@@ -4151,6 +4242,12 @@ async def _final_response_authority(
 def _should_use_local_rescue(message: str, history: list[dict[str, str]] | None = None) -> bool:
     intent = _classify_content_intent(message, history)
     recent_assistant = _recent_assistant_context(history)
+    if _resolve_script_scope(message, history) and any(
+        _assistant_recently_requested_script_details((item.get("content") or ""))
+        for item in (history or [])
+        if item.get("role") == "assistant"
+    ):
+        return True
     if intent in {
         "alternate_affirmations",
         "shorten",
@@ -4166,6 +4263,10 @@ def _should_use_local_rescue(message: str, history: list[dict[str, str]] | None 
         return True
     if intent == "request_script":
         return True
+    if intent in {"request_visualization", "request_mindset_tools", "request_daily_practices"}:
+        return True
+    if intent == "general_money_manifestation":
+        return _is_manifest_money_request(message) or _is_combined_money_support_request(message) or _is_support_template_context(history)
     if _assistant_recently_requested_script_details(recent_assistant):
         if _resolve_script_scope(message, history):
             return True

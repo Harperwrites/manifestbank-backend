@@ -251,6 +251,155 @@ _MODE_BANK = {
     ],
 }
 
+_STEM_BANK = {
+    "calm": {
+        "allow": [
+            "I allow steadiness to lead before urgency does.",
+            "I allow calm to settle my body first.",
+            "I allow enoughness to soften this moment.",
+            "I allow quiet to make the next step easier to see.",
+        ],
+        "choose": [
+            "I choose grounded decisions over rushed ones.",
+            "I choose a softer pace that still holds direction.",
+            "I choose clarity before I answer anything important.",
+            "I choose calm that keeps my judgment accurate.",
+        ],
+        "move": [
+            "I move gently and stay clear.",
+            "I move at a pace my body can trust.",
+            "I move without hardening around the moment.",
+            "I move with enough calm to stay accurate.",
+        ],
+    },
+    "money": {
+        "allow": [
+            "I allow receiving to feel cleaner and steadier.",
+            "I allow paid work to meet clearer standards.",
+            "I allow value to deepen when I handle it directly.",
+            "I allow stronger stewardship to support stronger income.",
+        ],
+        "choose": [
+            "I choose money decisions that come from steadiness, not strain.",
+            "I choose cleaner execution over vague hoping.",
+            "I choose direct money conversations that support better results.",
+            "I choose standards that make receiving easier to hold.",
+        ],
+        "move": [
+            "I move the paid step while it still matters.",
+            "I move on the offer, the ask, or the follow-up that changes the number.",
+            "I move revenue forward by finishing what leads to payment.",
+            "I move with visible value and clear follow-through.",
+        ],
+    },
+    "pressure": {
+        "allow": [
+            "I allow urgency to loosen so clarity can return.",
+            "I allow more space inside this decision.",
+            "I allow steadier pacing to protect good judgment.",
+            "I allow this moment to be simpler than the pressure suggests.",
+        ],
+        "choose": [
+            "I choose paced action over frantic action.",
+            "I choose clarity instead of internal rush.",
+            "I choose one grounded move over ten scattered ones.",
+            "I choose enough space to think well.",
+        ],
+        "move": [
+            "I move without compressing myself.",
+            "I move with clean pacing instead of panic.",
+            "I move one clear step at a time.",
+            "I move forward without making urgency my identity.",
+        ],
+    },
+    "confidence": {
+        "allow": [
+            "I allow my value to be visible without overproving it.",
+            "I allow composure to strengthen how I carry myself.",
+            "I allow self-trust to sound simple instead of loud.",
+            "I allow steadiness to make me easier to trust.",
+        ],
+        "choose": [
+            "I choose clear self-respect in how I decide.",
+            "I choose a direct voice over apology or performance.",
+            "I choose certainty that grows through evidence.",
+            "I choose presence that does not need to shrink first.",
+        ],
+        "move": [
+            "I move like someone who trusts her own judgment.",
+            "I move without making myself smaller first.",
+            "I move with clean follow-through that strengthens confidence.",
+            "I move with a voice that stays clear and usable.",
+        ],
+    },
+    "focus": {
+        "allow": [
+            "I allow one clear priority to hold my attention.",
+            "I allow simplicity to sharpen what matters now.",
+            "I allow consistency to carry more weight than mood.",
+            "I allow the next useful move to stay small and finishable.",
+        ],
+        "choose": [
+            "I choose the step that changes the result.",
+            "I choose completion over constant switching.",
+            "I choose deliberate attention over scattered effort.",
+            "I choose one useful task instead of ten competing ones.",
+        ],
+        "move": [
+            "I move the important task far enough for it to count.",
+            "I move with focused attention that stays clean.",
+            "I move one priority at a time.",
+            "I move with consistency that reduces noise.",
+        ],
+    },
+    "reset": {
+        "allow": [
+            "I allow this moment to be a clean return.",
+            "I allow softness and honesty to share the same moment.",
+            "I allow re-entry without turning it into punishment.",
+            "I allow a gentler pace to become a real reset.",
+        ],
+        "choose": [
+            "I choose a fresh start without self-attack.",
+            "I choose release before I decide what comes next.",
+            "I choose a cleaner beginning over shame.",
+            "I choose re-entry that feels honest and usable.",
+        ],
+        "move": [
+            "I move back into the moment without hardening first.",
+            "I move forward gently and still trust myself.",
+            "I move from reset into one clear next step.",
+            "I move on without carrying the old tension with me.",
+        ],
+    },
+    "general": {
+        "allow": [
+            "I allow steady choices to shape better outcomes.",
+            "I allow self-respect to show up in my actions.",
+            "I allow clean pacing to support better decisions.",
+            "I allow steadiness to quiet unnecessary noise.",
+            "I allow simple follow-through to strengthen trust in myself.",
+            "I allow clear standards to make action easier.",
+        ],
+        "choose": [
+            "I choose clarity over internal noise.",
+            "I choose the next step that actually moves things forward.",
+            "I choose standards that are clear enough to act on.",
+            "I choose consistency that I can respect.",
+            "I choose decisions that keep momentum clean and usable.",
+            "I choose the version of the step I can finish well.",
+        ],
+        "move": [
+            "I move forward with clean, usable action.",
+            "I move with enough calm to stay accurate.",
+            "I move on what matters instead of circling it.",
+            "I move with follow-through that keeps building trust.",
+            "I move in ways that keep my direction honest.",
+            "I move the useful thing before overthinking it.",
+        ],
+    },
+}
+
 _MODE_INSIGHTS = {
     "calm": [
         "Quiet and steady is enough here.",
@@ -452,6 +601,63 @@ def infer_affirmation_mode(
     return "general"
 
 
+def _pick_stem_line(
+    mode: str,
+    stem: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+    selected: list[str] | None = None,
+    hint: str = "",
+) -> str:
+    bank = list(_STEM_BANK.get(mode, _STEM_BANK["general"]).get(stem, []))
+    recent_lines = _recent_affirmation_lines(history, limit=3)
+    recent_keys = {_normalize(line) for line in recent_lines}
+    selected_keys = {_normalize(line) for line in (selected or [])}
+    ranked: list[tuple[float, int, str]] = []
+    for idx, line in enumerate(bank):
+        penalty = 0.0
+        for recent in recent_lines:
+            penalty = max(penalty, _similarity(line, recent))
+        if selected:
+            for existing in selected:
+                penalty = max(penalty, _similarity(line, existing))
+        ranked.append((penalty, _stable_index(mode, stem, hint, str(idx), size=97), line))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    for penalty, _, line in ranked:
+        normalized_line = _normalize(line)
+        if normalized_line in recent_keys or normalized_line in selected_keys:
+            continue
+        if recent_lines and penalty >= 0.68:
+            continue
+        if selected and any(_similarity(line, existing) >= 0.72 for existing in selected):
+            continue
+        return line
+    return ranked[0][2]
+
+
+def _stem_sequence(line_count: int, hint: str) -> list[str]:
+    base = ["allow", "choose", "move"]
+    sequences = {
+        3: [
+            ["allow", "choose", "move"],
+            ["choose", "move", "allow"],
+            ["move", "allow", "choose"],
+        ],
+        4: [
+            ["allow", "choose", "move", "allow"],
+            ["choose", "move", "allow", "choose"],
+            ["move", "allow", "choose", "move"],
+        ],
+        5: [
+            ["allow", "choose", "move", "allow", "move"],
+            ["choose", "move", "allow", "choose", "move"],
+            ["move", "allow", "choose", "allow", "move"],
+        ],
+    }
+    options = sequences.get(line_count, [base])
+    return options[_stable_index(hint, str(line_count), size=len(options))]
+
+
 def _select_lines(
     mode: str,
     *,
@@ -459,35 +665,10 @@ def _select_lines(
     line_count: int = 4,
     hint: str = "",
 ) -> list[str]:
-    bank = list(_MODE_BANK.get(mode, _MODE_BANK["general"]))
-    recent_lines = _recent_affirmation_lines(history, limit=2)
-    ranked: list[tuple[float, int, str]] = []
-    for idx, line in enumerate(bank):
-        penalty = 0.0
-        for recent in recent_lines:
-            penalty = max(penalty, _similarity(line, recent))
-        ranked.append((penalty, _stable_index(mode, hint, str(idx), size=97), line))
-    ranked.sort(key=lambda item: (item[0], item[1]))
+    stems = _stem_sequence(line_count, hint)
     selected: list[str] = []
-    for penalty, _, line in ranked:
-        if recent_lines and penalty >= 0.68:
-            continue
-        if selected and _similarity(line, selected[0]) >= 0.72:
-            continue
-        if any(_similarity(line, existing) >= 0.74 for existing in selected):
-            continue
-        selected.append(line)
-        if len(selected) >= line_count:
-            break
-    if len(selected) < min(3, line_count):
-        for penalty, _, line in ranked:
-            if line in selected:
-                continue
-            if any(_similarity(line, existing) >= 0.74 for existing in selected):
-                continue
-            selected.append(line)
-            if len(selected) >= min(3, line_count):
-                break
+    for idx, stem in enumerate(stems):
+        selected.append(_pick_stem_line(mode, stem, history=history, selected=selected, hint=f"{hint}|{idx}"))
     return selected[:line_count]
 
 

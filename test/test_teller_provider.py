@@ -187,6 +187,34 @@ def test_build_fortune_affirmations_varies_across_three_consecutive_requests():
     assert set(all_lines[0]).isdisjoint(set(all_lines[2]))
 
 
+def test_build_fortune_affirmations_uses_mixed_allow_choose_move_stems():
+    output = build_fortune_affirmations(
+        message="affirmations please",
+        requested_topic="general",
+        history=[],
+        variant_hint="requested",
+    )
+
+    lines = _bullet_lines(output)
+    lowered = [line.lower() for line in lines]
+    assert 3 <= len(lines) <= 5
+    assert any(line.startswith("i allow") for line in lowered)
+    assert any(line.startswith("i choose") for line in lowered)
+    assert any(line.startswith("i move") for line in lowered)
+
+
+def test_build_fortune_affirmations_never_uses_only_one_stem_type():
+    output = build_fortune_affirmations(
+        message="affirmations please",
+        requested_topic="money",
+        history=[],
+        variant_hint="requested",
+    )
+
+    stems = {line.lower().split()[1] for line in _bullet_lines(output)}
+    assert len(stems) >= 3
+
+
 def test_build_fortune_affirmations_avoids_recent_phrase_repetition():
     previous = "\n".join(
         [
@@ -817,6 +845,95 @@ async def test_generate_teller_reply_script_request_bypasses_llm_and_returns_sin
 
     assert cached is False
     assert reply.startswith("Script:")
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_manifesting_money_returns_direct_combined_support_without_llm(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for direct money support")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    cached, reply = await generate_teller_reply(880101, "help manifesting money")
+
+    assert cached is False
+    assert "Mindset:" in reply
+    assert "Action:" in reply
+    assert "Visualization:" in reply
+    assert "Would you prefer mindset tools, practical action steps, or a short combined plan?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_visualization_returns_direct_practice(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for visualization support")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    history = [{"role": "user", "content": "help manifesting money"}]
+    cached, reply = await generate_teller_reply(880102, "visualization", history=history)
+
+    assert cached is False
+    assert reply.lstrip().startswith("- ")
+    assert "Can you clarify what you'd like to do?" not in reply
+    assert " - " not in reply
+    assert len(_bullet_lines(reply)) == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_mindset_tools_returns_direct_support(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for mindset tools")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    history = [{"role": "user", "content": "help manifesting money"}]
+    cached, reply = await generate_teller_reply(880103, "mindset tools", history=history)
+
+    assert cached is False
+    assert reply.lstrip().startswith("- ")
+    assert "clarify" not in reply.lower()
+    assert " - " not in reply
+    assert len(_bullet_lines(reply)) == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_short_daily_practices_returns_structured_content_immediately(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for short daily practices")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    history = [{"role": "user", "content": "help manifesting money"}]
+    cached, reply = await generate_teller_reply(880104, "short daily practices", history=history)
+
+    assert cached is False
+    assert "Speak-Aloud Anchor:" in reply
+    assert "Next Step:" in reply
+    assert "## Insight" not in reply
+    assert "## Reflection" not in reply
+    assert " - " not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_support_flow_asks_no_more_than_one_question(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for deterministic support flow")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    history = []
+    cached, first = await generate_teller_reply(880105, "help manifesting money", history=history)
+    assert cached is False
+    history.extend([{"role": "user", "content": "help manifesting money"}, {"role": "assistant", "content": first}])
+    cached, second = await generate_teller_reply(880105, "visualization", history=history)
+    assert cached is False
+    history.extend([{"role": "user", "content": "visualization"}, {"role": "assistant", "content": second}])
+    cached, third = await generate_teller_reply(880105, "short daily practices", history=history)
+    assert cached is False
+
+    combined = "\n".join([first, second, third])
+    assert combined.count("?") <= 1
 
 
 @pytest.mark.asyncio

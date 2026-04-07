@@ -26,6 +26,7 @@ except Exception:  # pragma: no cover - optional dependency
     sentence_transformers_util = None
 
 from app.core.config import settings
+from app.services.fortune_affirmations import build_fortune_affirmations, _guard_affirmation_markdown
 
 
 class TellerRateLimiter:
@@ -903,6 +904,79 @@ def _assistant_recently_requested_affirmation_style(text: str) -> bool:
         "financial affirmations",
     )
     return any(marker in lowered for marker in markers)
+
+
+def _assistant_recently_requested_affirmation_topic(text: str) -> bool:
+    lowered = (text or "").lower()
+    if "affirmation" not in lowered or _assistant_recently_requested_affirmation_style(text):
+        return False
+    if "?" not in lowered:
+        return False
+    markers = (
+        "what kind",
+        "which kind",
+        "what type",
+        "which type",
+        "what kind of affirmations",
+        "which kind of affirmations",
+        "what should the affirmations focus on",
+        "what do you want the affirmations to support",
+        "do you want calm",
+        "calm, confidence, focus",
+        "calm, confidence, or focus",
+        "calm, confidence, focus, or finances",
+        "calm, confidence, focus, finances",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _is_affirmation_topic_reply(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    return normalized in {
+        "calm",
+        "confidence",
+        "focus",
+        "finances",
+        "financial",
+        "money",
+        "wealth",
+    }
+
+
+def _is_direct_affirmation_set_request(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    if "affirmation" not in normalized:
+        return False
+    direct_markers = (
+        "brief",
+        "short",
+        "one line",
+        "one-line",
+        "calm",
+        "confidence",
+        "focus",
+        "finance",
+        "financial",
+        "money",
+        "wealth",
+    )
+    return any(marker in normalized for marker in direct_markers)
+
+
+def _is_plain_affirmations_request(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    plain_requests = {
+        "affirmation",
+        "affirmations",
+        "affirmations please",
+        "affirmation please",
+        "give me affirmations",
+        "give me affirmation",
+        "give me some affirmations",
+        "a few affirmations",
+        "some affirmations",
+    }
+    return normalized in plain_requests
 
 
 def _extract_affirmation_topic(message: str, history: list[dict[str, str]] | None = None) -> str:
@@ -2262,9 +2336,18 @@ def _detect_recent_content_artifact(history: list[dict[str, str]] | None = None)
         return "none"
     if _assistant_recently_offered_rewrite(text):
         return "rewrite_offer"
-    if "**script**" in lowered or "**shorter script**" in lowered or "\nscript" in lowered or "\nshorter script" in lowered:
+    if (
+        "**script**" in lowered
+        or "**shorter script**" in lowered
+        or re.search(r"(?m)^(script|shorter script):?\s*$", lowered)
+        or "\nscript" in lowered
+        or "\nshorter script" in lowered
+    ):
         return "script"
-    if "affirmation" in lowered and "- " in text:
+    affirmation_bullets = _extract_previous_affirmations([{"role": "assistant", "content": text}])
+    if ("affirmation" in lowered and "- " in text) or (
+        len(affirmation_bullets) >= 3 and sum(1 for line in affirmation_bullets if line.lower().startswith("i ")) >= 2
+    ):
         return "affirmations"
     if "2-minute reset" in lowered or "2 minute reset" in lowered or "30-second reset" in lowered:
         return "reset"
@@ -2668,9 +2751,29 @@ def _build_affirmation_set(
     shorter: bool = False,
     history: list[dict[str, str]] | None = None,
     variant_hint: str = "",
+    source_message: str | None = None,
 ) -> str:
-    lines = _affirmation_lines_for_topic(topic, stronger=stronger, shorter=shorter, history=history, variant_hint=variant_hint)
-    return "\n".join(["Here are a few affirmations:", "", *[f"- {line}" for line in lines]])
+    return build_fortune_affirmations(
+        message=source_message,
+        requested_topic=topic,
+        history=history,
+        shorter=shorter,
+        stronger=stronger,
+        variant_hint=variant_hint,
+    )
+
+
+def _build_affirmation_style_clarify_reply(topic: str) -> str:
+    resolved = _canonical_content_topic(topic)
+    if resolved == "confidence":
+        label = "confidence"
+    elif resolved == "focus":
+        label = "focus"
+    elif resolved == "more money":
+        label = "financial"
+    else:
+        label = "calm"
+    return f"Would you prefer brief, one-line {label} affirmations or a longer set?"
 
 
 def _build_repair_reply(history: list[dict[str, str]] | None = None) -> str:
@@ -2820,6 +2923,148 @@ def _build_another_variant_clarify_reply() -> str:
     return "Do you want another script, affirmations, reset, or story?"
 
 
+def _assistant_recently_requested_script_details(text: str) -> bool:
+    lowered = (text or "").lower()
+    if "?" not in lowered:
+        return False
+    has_script_context = "script" in lowered or ("daily" in lowered and "weekly" in lowered)
+    if not has_script_context:
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "what kind of script",
+            "what kind of script would help",
+            "what should the script",
+            "what do you want the script",
+            "do you want a daily check in a weekly check in or both",
+            "do you want a daily check-in a weekly check-in or both",
+            "daily",
+            "weekly",
+            "check-in",
+            "check in",
+            "money",
+            "based on that story",
+        )
+    )
+
+
+def _script_clarification_count(history: list[dict[str, str]] | None = None) -> int:
+    if not history:
+        return 0
+    count = 0
+    for item in history:
+        if item.get("role") != "assistant":
+            continue
+        if _assistant_recently_requested_script_details(item.get("content") or ""):
+            count += 1
+    return count
+
+
+def _is_impatient_delivery_request(message: str) -> bool:
+    normalized = _normalize_brief_text(message)
+    if not normalized:
+        return False
+    direct = (
+        "just answer",
+        "just do it",
+        "stop asking",
+        "enough questions",
+        "come on",
+        "bruh",
+        "please answer",
+    )
+    return any(phrase in normalized for phrase in direct)
+
+
+def _resolve_script_scope(message: str, history: list[dict[str, str]] | None = None) -> str:
+    normalized = _normalize_brief_text(message)
+    recent = f"{_normalize_brief_text(_recent_user_context(history))} {_normalize_brief_text(_recent_assistant_context(history))}".strip()
+    haystack = f"{recent} {normalized}".strip()
+    if "both" in normalized:
+        return "both"
+    has_daily = "daily" in haystack
+    has_weekly = "weekly" in haystack
+    if has_daily and has_weekly:
+        return "both"
+    if has_daily:
+        return "daily"
+    if has_weekly:
+        return "weekly"
+    return ""
+
+
+def _build_daily_checkin_script() -> str:
+    return "\n".join(
+        [
+            "- Name the paid move that matters most today.",
+            "- Identify the money conversation, follow-up, or task that needs a direct answer.",
+            "- Choose what would make today feel cleaner by tonight.",
+            "",
+            "Speak-Aloud Anchor:",
+            "- I move the paid step clearly and cleanly today.",
+            "",
+            "Next Step:",
+            "- Block ten focused minutes for the one money move that changes the day.",
+        ]
+    )
+
+
+def _build_weekly_checkin_script() -> str:
+    return "\n".join(
+        [
+            "- Note which actions this week directly supported income, clarity, or follow-through.",
+            "- Name where hesitation slowed a paid move or necessary decision.",
+            "- Close the open loops that need to be resolved before next week begins.",
+            "- Decide which one result you want to make easier next week.",
+            "",
+            "Adjustments:",
+            "- Stop carrying open loops into the next week.",
+            "- Start the paid move earlier instead of waiting for perfect timing.",
+            "- Simplify the one process that keeps slowing follow-through.",
+            "",
+            "Speak-Aloud Anchor:",
+            "- I review the week clearly and adjust without drama.",
+            "",
+            "Next Step:",
+            "- Choose one weekly adjustment and calendar it before this check-in ends.",
+        ]
+    )
+
+
+def _build_checkin_script_package(scope: str) -> str:
+    daily = _build_daily_checkin_script()
+    weekly = _build_weekly_checkin_script()
+    if scope == "daily":
+        return daily
+    if scope == "weekly":
+        return weekly
+    return "\n\n".join(["Daily:", daily, "", "Weekly:", weekly]).strip()
+
+
+def _build_brief_spoken_prompt(topic: str) -> str:
+    resolved = _canonical_content_topic(topic)
+    if resolved == "more money":
+        lines = [
+            "I make clean decisions that support stronger income.",
+            "I follow through while the opportunity is still real.",
+            "I let steadiness increase what I can hold.",
+        ]
+    elif resolved == "new opportunities":
+        lines = [
+            "I notice what deserves a direct answer.",
+            "I move while the opening is still live.",
+            "I trust myself to respond clearly.",
+        ]
+    else:
+        lines = [
+            "I stay clear enough to choose well.",
+            "I follow through on what matters now.",
+            "I let steadiness shape the next move.",
+        ]
+    return "\n".join(lines)
+
+
 def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = None) -> str:
     normalized = (message or "").strip().lower()
     focus = _clean_subject(_extract_primary_prompt_focus(message))
@@ -2840,8 +3085,45 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
     default_topic = stable_user_focus or prior_user_focus or focus or "more money"
     inferred_script_topic = _infer_topic_from_text(previous_script) if previous_script else "more money"
     script_topic = inferred_script_topic if inferred_script_topic != "more money" or default_topic == "more money" else default_topic
+    script_scope = _resolve_script_scope(message, history)
+    if last_artifact == "story" and current_intent in {"alternate_story", "another_variant"}:
+        return _build_manifestation_story(default_topic, history=history, variant_hint="alternate")
+    if current_intent == "request_script":
+        if last_artifact == "story":
+            return _build_script_response(default_topic or "more money", history=history, variant_hint="requested")
+        if last_artifact == "script":
+            return _build_script_response(
+                script_topic,
+                tone="stronger" if _content_artifact_count(history, "script") >= 1 else "steady",
+                history=history,
+                variant_hint="alternate" if _content_artifact_count(history, "script") >= 1 else "requested",
+            )
+        if "spoken prompt" in normalized or "spoken" in normalized:
+            return _build_brief_spoken_prompt(default_topic)
+        if script_scope:
+            return _build_checkin_script_package(script_scope)
+        if _script_clarification_count(history) >= 1 or _assistant_recently_requested_script_details(prior_assistant_text):
+            return _build_checkin_script_package(script_scope or "both")
+        return _build_script_response(default_topic, history=history, variant_hint="requested")
+    if (
+        script_scope
+        and (
+            _is_script_followup(message)
+            or "check in" in normalized
+            or "check-in" in normalized
+            or _script_clarification_count(history) >= 1
+            or _assistant_recently_requested_script_details(prior_assistant_text)
+        )
+    ):
+        return _build_checkin_script_package(script_scope)
+    if _is_impatient_delivery_request(message) and _script_clarification_count(history) >= 1:
+        return _build_checkin_script_package(script_scope or "both")
     if current_intent == "approve_rewrite" and last_artifact == "rewrite_offer":
         return _build_rewrite_fulfillment_reply(history)
+    if _is_plain_affirmations_request(message):
+        return _build_affirmation_set("general", history=history, variant_hint="requested", source_message=message)
+    if _assistant_recently_requested_affirmation_topic(prior_assistant_text) and _is_affirmation_topic_reply(message):
+        return _build_affirmation_style_clarify_reply(_extract_affirmation_topic(message, history))
     if current_intent == "request_energy":
         return _build_energy_reply(default_topic)
     if current_intent == "praise":
@@ -2870,13 +3152,7 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
         if current_intent == "shorten":
             return _build_affirmation_set(default_topic, shorter=True, history=history, variant_hint="shorter")
         if current_intent in {"strengthen", "rewrite", "alternate_affirmations", "another_variant"}:
-            return "\n".join(
-                [
-                    "You’re right. Here’s a stronger version.",
-                    "",
-                    _build_affirmation_set(default_topic, stronger=True, history=history, variant_hint="alternate"),
-                ]
-            )
+            return _build_affirmation_set(default_topic, stronger=True, history=history, variant_hint="alternate")
     if last_artifact == "story":
         if current_intent == "request_script":
             return _build_story_script_clarify_reply()
@@ -2899,10 +3175,10 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
     if requested_artifact == "affirmations":
         affirmation_topic = _extract_affirmation_topic(message, history)
         if current_intent == "shorten":
-            return _build_affirmation_set(affirmation_topic, shorter=True, history=history, variant_hint="shorter")
+            return _build_affirmation_set(affirmation_topic, shorter=True, history=history, variant_hint="shorter", source_message=message)
         if current_intent == "strengthen":
-            return _build_affirmation_set(affirmation_topic, stronger=True, history=history, variant_hint="stronger")
-        return _build_affirmation_set(affirmation_topic, history=history, variant_hint="requested")
+            return _build_affirmation_set(affirmation_topic, stronger=True, history=history, variant_hint="stronger", source_message=message)
+        return _build_affirmation_set(affirmation_topic, history=history, variant_hint="requested", source_message=message)
     if requested_artifact == "reset":
         return _build_money_reset_reply(default_topic, history=history, variant_hint="requested")
     if "relaxing into wealth" in normalized:
@@ -2928,7 +3204,12 @@ def _local_rescue_reply(message: str, history: list[dict[str, str]] | None = Non
     if current_intent == "request_script":
         return _build_script_response(default_topic, history=history, variant_hint="requested")
     if current_intent == "request_affirmations":
-        return _build_affirmation_set(_extract_affirmation_topic(message, history), history=history, variant_hint="requested")
+        return _build_affirmation_set(
+            _extract_affirmation_topic(message, history),
+            history=history,
+            variant_hint="requested",
+            source_message=message,
+        )
     if _is_daily_set_followup(message):
         return _build_money_daily_set_reply(default_topic)
     if current_intent == "request_reset":
@@ -3574,7 +3855,8 @@ def _normalize_punctuation(text: str) -> str:
     cleaned = re.sub(r";\s*", ", ", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\bi\b", "I", cleaned)
-    cleaned = re.sub(r"(?<=\w)\s*\n\s*(?=[a-zA-Z])", " ", cleaned)
+    if "## " not in cleaned and not re.search(r"(?m)^\s*[-*+]\s", cleaned):
+        cleaned = re.sub(r"(?<=\w)\s*\n\s*(?=[a-zA-Z])", " ", cleaned)
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
     cleaned = re.sub(
         r"(?i)(\b(?:what|which|who|when|where|why|how|would|could|should|do|does|did|are|is)\b[^.?!\n]{8,})\.\s+([a-z])",
@@ -3604,6 +3886,43 @@ def _normalize_punctuation(text: str) -> str:
     else:
         cleaned = stripped
     return cleaned
+
+
+def _split_inline_dash_bullets(text: str) -> str:
+    if not text:
+        return text
+    rebuilt: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            rebuilt.append("")
+            continue
+        if stripped.startswith("- ") and " - " in stripped[2:]:
+            parts = [part.strip(" -") for part in re.split(r"\s+-\s+", stripped[2:]) if part.strip()]
+            if len(parts) >= 2:
+                rebuilt.extend(f"- {part}" for part in parts)
+                continue
+        if stripped.startswith(("## ", "- ", "* ", "+ ")) or re.match(r"^\d+\.\s", stripped):
+            rebuilt.append(stripped)
+            continue
+        if " - " in stripped:
+            parts = [part.strip(" -") for part in re.split(r"\s+-\s+", stripped) if part.strip()]
+            if len(parts) >= 2 and sum(1 for part in parts if part[:1].isupper() or part.lower().startswith("i ")) >= 2:
+                rebuilt.extend(f"- {part}" for part in parts)
+                continue
+        rebuilt.append(stripped)
+    return "\n".join(rebuilt).strip()
+
+
+def _ensure_markdown_section_spacing(text: str) -> str:
+    if not text:
+        return text
+    guarded = text.strip()
+    for header in ("Insight", "Key Points", "Reflection", "Speak-Aloud Anchor", "Next Step", "Daily Check-In", "Weekly Check-In"):
+        guarded = re.sub(rf"## {header}[ \t]*([^\n#].+)", rf"## {header}\n\n\1", guarded)
+        guarded = re.sub(rf"## {header}\n(?!\n)", f"## {header}\n\n", guarded)
+    return re.sub(r"\n{3,}", "\n\n", guarded).strip()
 
 
 def _strip_unsupported_action_offers(text: str) -> str:
@@ -3671,65 +3990,7 @@ def _stop_after_clarifying_question(text: str) -> str:
 
 
 def _enforce_markdown_structure(text: str) -> str:
-    if not text:
-        return text
-    plain = text.strip()
-    if len(plain) <= 140:
-        return plain
-    if re.search(r"^\s*(#{1,6}\s|[-*+]\s|\d+\.\s)", plain, re.M):
-        return plain
-    if re.match(r"^(hi|hello|hey)\b", plain.lower()):
-        return plain
-    text = text.replace("Key insight:", "").replace("Key Insight:", "").strip()
-    # Normalize duplicated "Insight" labels
-    text = re.sub(r"^(Insight\s*\n)+", "", text, flags=re.I).strip()
-    text = re.sub(r"^##\s*Insight\s*\nInsight\s*\n", "## Insight\n", text, flags=re.I).strip()
-    has_required = "## Insight" in text and "## Key Points" in text and "## Reflection" in text
-    if has_required:
-        return text
-
-    raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    seen = set()
-    sentences: list[str] = []
-    for s in raw_sentences:
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        sentences.append(s)
-    if not sentences:
-        return text
-
-    intro = " ".join(sentences[:2]) if len(sentences) > 1 else sentences[0]
-    remainder = sentences[2:] if len(sentences) > 2 else sentences[1:]
-    list_cue = bool(re.search(r"\b(next steps|choose one|pick one|options|here are|for example|focus on)\b", plain.lower()))
-
-    bullets: list[str] = []
-    candidate_bullets: list[str] = []
-    for s in remainder:
-        if s.endswith("?"):
-            continue
-        if s.lower() in intro.lower():
-            continue
-        if len(s) > 110:
-            continue
-        candidate_bullets.append(s.rstrip("."))
-    if list_cue or len(candidate_bullets) >= 2:
-        bullets = candidate_bullets[:3]
-
-    reflection = next((s for s in sentences if s.endswith("?") and s not in intro), "")
-
-    lines = ["## Insight", intro, ""]
-    if bullets:
-        lines.extend(["## Key Points", "", *[f"- {b}" for b in bullets]])
-        lines.append("")
-    elif len(sentences) > 2:
-        fallback_points = [s.rstrip(".") for s in sentences[1:4] if not s.endswith("?")]
-        if fallback_points:
-            lines.extend(["## Key Points", "", *[f"- {point}" for point in fallback_points], ""])
-    if reflection:
-        lines.extend(["## Reflection", reflection])
-    return "\n".join(lines).strip()
+    return (text or "").strip()
 
 
 def _sentence_count(text: str) -> int:
@@ -3750,16 +4011,147 @@ def _light_cleanup(text: str) -> str:
     cleaned = _remove_repeated_clauses(cleaned)
     cleaned = _strip_disclaimers(cleaned)
     cleaned = _stop_after_clarifying_question(cleaned)
-    if _sentence_count(cleaned) > 2:
-        cleaned = _enforce_markdown_structure(cleaned)
     cleaned = cleaned.strip()
     return cleaned
 
 
+def _strip_legacy_response_phrases(text: str) -> str:
+    if not text:
+        return text
+    cleaned = text
+    cleaned = re.sub(r"##\s*(Insight|Key Points|Reflection)\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\b(Insight|Key Points|Reflection):\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"(?im)^\s*##\s*(Insight|Key Points|Reflection)\s*$\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(Insight|Key Points|Reflection):\s*$\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*pick\s*2\s*[-–]\s*4\b.*$\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*here are a few affirmations:\s*\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*here are a few you can actually use without forcing the feeling\.\s*\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*here are a few\b.*$\n?", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*nice\.\s*\n?", "", cleaned)
+    cleaned = re.sub(r"(?i)\bfresh set\b", "", cleaned)
+    cleaned = re.sub(r"(?i)\bfrom a different angle\b", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _response_authority_kind(message: str, history: list[dict[str, str]] | None, text: str) -> str:
+    intent = _classify_content_intent(message, history)
+    artifact = _detect_recent_content_artifact(history)
+    lowered = (text or "").lower()
+    if intent in {"praise", "reflective", "greeting", "reject", "unclear"}:
+        return "general"
+    if (
+        intent == "request_script"
+        or artifact == "script"
+        or "**script**" in lowered
+        or "**shorter script**" in lowered
+        or "speak-aloud anchor:" in lowered
+        or "daily:" in lowered
+        or "weekly:" in lowered
+    ):
+        return "script"
+    if intent == "request_affirmations" or artifact == "affirmations":
+        return "affirmations"
+    return "general"
+
+
+def _normalize_affirmation_reply(text: str) -> str:
+    cleaned = _strip_legacy_response_phrases(text)
+    cleaned = _split_inline_dash_bullets(cleaned)
+    bullet_lines = [line.strip() for line in cleaned.splitlines() if line.strip().startswith("- ")]
+    normalized_bullets: list[str] = []
+    for line in bullet_lines:
+        body = line[2:].strip()
+        if re.search(r"\bI\b", body) and not body.startswith("I "):
+            body = body[body.find("I ") :].strip()
+        normalized_bullets.append(f"- {body}")
+    bullet_lines = normalized_bullets
+    if not bullet_lines:
+        fragments: list[str] = []
+        for part in re.split(r"(?<=[.!?])\s+|\n+", cleaned):
+            stripped = part.strip(" -")
+            if not stripped or stripped.endswith("?"):
+                continue
+            if stripped.lower().startswith(("speak-aloud anchor", "next step", "daily:", "weekly:", "adjustments:")):
+                continue
+            fragments.append(stripped.rstrip(".") + ".")
+        bullet_lines = [f"- {item}" for item in fragments[:5]]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for line in bullet_lines:
+        key = re.sub(r"[^a-z0-9]+", " ", line.lower()).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(line)
+    return "\n".join(deduped[:5]).strip()
+
+
+def _sanitize_general_reply(text: str) -> str:
+    cleaned = _strip_legacy_response_phrases(text)
+    if re.search(r"(?m)^\s*-\s", cleaned):
+        return "\n".join(line.strip() for line in cleaned.splitlines() if line.strip()).strip()
+    cleaned = _ensure_markdown_section_spacing(cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _sanitize_script_reply(text: str) -> str:
+    cleaned = _strip_legacy_response_phrases(text)
+    cleaned = cleaned.replace("**Script**", "Script:").replace("**Shorter Script**", "Script:")
+    cleaned = _split_inline_dash_bullets(cleaned)
+    lines = [line.rstrip() for line in cleaned.splitlines()]
+    kept: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if kept and kept[-1] != "":
+                kept.append("")
+            continue
+        if stripped.lower().startswith(("script:", "daily:", "weekly:", "adjustments:", "speak-aloud anchor:", "next step:")):
+            kept.append(stripped)
+            continue
+        if stripped.startswith("- "):
+            kept.append(stripped)
+            continue
+        if stripped.endswith("?"):
+            kept.append(stripped)
+            continue
+        kept.append(stripped)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept).strip())
+
+
+async def _proof_final_reply(text: str, *, short_mode: bool = False) -> str:
+    stripped = (text or "").strip()
+    if not stripped:
+        return ""
+    return re.sub(r"\n{3,}", "\n\n", stripped).strip()
+
+
+async def _final_response_authority(
+    message: str,
+    text: str,
+    history: list[dict[str, str]] | None = None,
+    *,
+    short_mode: bool = False,
+) -> str:
+    stripped = (text or "").strip()
+    if not stripped:
+        return ""
+    kind = _response_authority_kind(message, history, stripped)
+    if kind == "script":
+        return _sanitize_script_reply(stripped)
+    if kind == "affirmations":
+        return _normalize_affirmation_reply(stripped)
+    proofed = await _copyedit_reply(stripped, short_mode=short_mode)
+    proofed = _light_cleanup(proofed)
+    proofed = _sanitize_general_reply(proofed)
+    return proofed
+
+
 def _should_use_local_rescue(message: str, history: list[dict[str, str]] | None = None) -> bool:
     intent = _classify_content_intent(message, history)
+    recent_assistant = _recent_assistant_context(history)
     if intent in {
-        "request_affirmations",
         "alternate_affirmations",
         "shorten",
         "strengthen",
@@ -3770,9 +4162,18 @@ def _should_use_local_rescue(message: str, history: list[dict[str, str]] | None 
         if intent in {"shorten", "strengthen", "rewrite", "approve_rewrite", "shift_first_person"}:
             return _detect_recent_content_artifact(history) != "none"
         return True
+    if intent == "request_affirmations":
+        return True
+    if intent == "request_script":
+        return True
+    if _assistant_recently_requested_script_details(recent_assistant):
+        if _resolve_script_scope(message, history):
+            return True
+        if _is_impatient_delivery_request(message):
+            return True
     if intent == "another_variant":
         return _detect_recent_content_artifact(history) in {"affirmations", "script", "story"}
-    if _assistant_recently_requested_affirmation_style(_recent_assistant_context(history)) and _is_short_followup(message):
+    if _assistant_recently_requested_affirmation_style(recent_assistant) and _is_short_followup(message):
         return True
     return False
 
@@ -3783,26 +4184,40 @@ async def generate_teller_reply(
     history: list[dict[str, str]] | None = None,
     short_mode: bool = False,
 ) -> tuple[bool, str]:
+    started_at = time.perf_counter()
     repeat_count = _get_repeat_count(message, history)
 
     if _should_short_circuit_neutral_assist(message, history):
-        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+        return False, await _final_response_authority(message, _local_rescue_reply(message, history=history), history=history, short_mode=short_mode)
     if _should_use_local_rescue(message, history):
-        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+        return False, await _final_response_authority(message, _local_rescue_reply(message, history=history), history=history, short_mode=short_mode)
 
     provider = (settings.TELLER_PROVIDER or "stub").lower()
+    llm_started_at = time.perf_counter()
     if provider == "openai":
         reply = await _openai_response(message, history=history, short_mode=short_mode, repeat_count=repeat_count)
     else:
         reply = "How can I help you today?"
+    llm_done_at = time.perf_counter()
 
     if reply and len(reply) > settings.TELLER_MAX_CHARS:
         reply = _trim_to_full_sentence(reply, settings.TELLER_MAX_CHARS)
 
-    reply = await _copyedit_reply(reply, short_mode=short_mode)
-    reply = _light_cleanup(reply)
     if not reply or not reply.strip() or _is_retry_placeholder(reply):
         reply = _local_rescue_reply(message, history=history)
+    copyedit_started_at = time.perf_counter()
+    reply = await _final_response_authority(message, reply, history=history, short_mode=short_mode)
+    copyedit_done_at = time.perf_counter()
+    cleanup_done_at = copyedit_done_at
+    logger.info(
+        "teller_provider_timing mode=generate provider=%s message=%r total_ms=%d llm_ms=%d copyedit_ms=%d cleanup_ms=%d",
+        provider,
+        message[:120],
+        int((cleanup_done_at - started_at) * 1000),
+        int((llm_done_at - llm_started_at) * 1000),
+        int((copyedit_done_at - copyedit_started_at) * 1000),
+        int((cleanup_done_at - copyedit_done_at) * 1000),
+    )
     return False, reply
 
 
@@ -3813,14 +4228,16 @@ async def stream_teller_reply(
     short_mode: bool = False,
     on_delta: Any | None = None,
 ) -> tuple[bool, str]:
+    started_at = time.perf_counter()
     repeat_count = _get_repeat_count(message, history)
 
     if _should_short_circuit_neutral_assist(message, history):
-        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+        return False, await _final_response_authority(message, _local_rescue_reply(message, history=history), history=history, short_mode=short_mode)
     if _should_use_local_rescue(message, history):
-        return False, _light_cleanup(_local_rescue_reply(message, history=history))
+        return False, await _final_response_authority(message, _local_rescue_reply(message, history=history), history=history, short_mode=short_mode)
 
     provider = (settings.TELLER_PROVIDER or "stub").lower()
+    llm_started_at = time.perf_counter()
     if provider == "openai":
         reply = await _openai_response_stream(
             message,
@@ -3833,12 +4250,24 @@ async def stream_teller_reply(
             reply = await _openai_response(message, history=history, short_mode=short_mode, repeat_count=repeat_count)
     else:
         reply = "How can I help you today?"
+    llm_done_at = time.perf_counter()
 
     if reply and len(reply) > settings.TELLER_MAX_CHARS:
         reply = _trim_to_full_sentence(reply, settings.TELLER_MAX_CHARS)
 
-    reply = await _copyedit_reply(reply, short_mode=short_mode)
-    reply = _light_cleanup(reply)
     if not reply or not reply.strip() or _is_retry_placeholder(reply):
         reply = _local_rescue_reply(message, history=history)
+    copyedit_started_at = time.perf_counter()
+    reply = await _final_response_authority(message, reply, history=history, short_mode=short_mode)
+    copyedit_done_at = time.perf_counter()
+    cleanup_done_at = copyedit_done_at
+    logger.info(
+        "teller_provider_timing mode=stream provider=%s message=%r total_ms=%d llm_ms=%d copyedit_ms=%d cleanup_ms=%d",
+        provider,
+        message[:120],
+        int((cleanup_done_at - started_at) * 1000),
+        int((llm_done_at - llm_started_at) * 1000),
+        int((copyedit_done_at - copyedit_started_at) * 1000),
+        int((cleanup_done_at - copyedit_done_at) * 1000),
+    )
     return False, reply

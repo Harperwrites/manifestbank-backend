@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime, UTC
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
@@ -51,6 +52,7 @@ from app.services.fx import convert_amount_with_rate
 router = APIRouter(tags=["teller"])
 STREAM_REPLY_TIMEOUT_SECONDS = 30
 STREAM_IDLE_TIMEOUT_SECONDS = 12
+logger = logging.getLogger("teller")
 
 CONFIRM_WORDS = {
     "yes",
@@ -67,10 +69,11 @@ CONFIRM_WORDS = {
     "okay",
     "proceed",
     "sure",
+    "yes please",
     "thats right",
     "that's right",
 }
-CANCEL_WORDS = {"no", "n", "cancel", "stop", "never mind", "nevermind"}
+CANCEL_WORDS = {"no", "n", "cancel", "stop", "never mind", "nevermind", "nope", "nah"}
 EDIT_CONFIRMATION_PATTERNS = (
     "change",
     "different",
@@ -92,7 +95,8 @@ ACCOUNT_POINTING_WORDS = {
     "into that account",
     "into this account",
 }
-THANKS_WORDS = {"thanks", "thank you", "thx", "ty", "appreciate it"}
+THANKS_WORDS = {"thanks", "thank you", "thx", "ty", "appreciate it", "thank ypu"}
+NO_THANKS_WORDS = {"no thanks", "no thank you", "thanks no", "thank you no"}
 HISTORY_REFERENCE_WORDS = {
     "check history",
     "check your history",
@@ -211,11 +215,14 @@ def _classify_confirmation_intent(message: str) -> str:
         "stop",
         "never mind",
         "nevermind",
+        "no thanks",
+        "no thank you",
         "wait",
         "hold on",
         "not that",
         "wrong",
         "nope",
+        "nah",
     }
     edit_phrases = {
         "change the amount",
@@ -305,7 +312,51 @@ def _looks_like_confirmation_typo(message: str) -> bool:
 
 def _is_thanks_message(message: str) -> bool:
     lower_msg = re.sub(r"[.!?,]+", "", message.lower()).strip()
-    return lower_msg in THANKS_WORDS
+    if lower_msg in THANKS_WORDS:
+        return True
+    compact = re.sub(r"\s+", " ", lower_msg).strip()
+    return SequenceMatcher(None, compact, "thank you").ratio() >= 0.82
+
+
+def _is_no_thanks_message(message: str) -> bool:
+    lower_msg = re.sub(r"[.!?,]+", "", message.lower()).strip()
+    return lower_msg in NO_THANKS_WORDS
+
+
+def _is_simple_decline_message(message: str) -> bool:
+    lower_msg = re.sub(r"[.!?,]+", "", message.lower()).strip()
+    return lower_msg in {"no", "nope", "nah", "cancel", "stop"}
+
+
+def _is_simple_greeting(message: str) -> bool:
+    lower_msg = re.sub(r"[.!?,]+", "", message.lower()).strip()
+    return lower_msg in {"hi", "hello", "hey", "hi there", "hello there", "hey there"}
+
+
+def _new_teller_timing() -> dict[str, float]:
+    return {"started_at": time.perf_counter()}
+
+
+def _mark_teller_timing(timing: dict[str, float], stage: str) -> None:
+    timing[stage] = time.perf_counter()
+
+
+def _emit_teller_timing(kind: str, message: str, timing: dict[str, float], *, used_llm: bool = False) -> None:
+    end = time.perf_counter()
+    total_ms = int((end - timing.get("started_at", end)) * 1000)
+    parts = [f"kind={kind}", f"used_llm={str(used_llm).lower()}", f"total_ms={total_ms}"]
+    ordered = [
+        ("received_ms", "received"),
+        ("pending_ms", "pending_checked"),
+        ("state_ms", "state_resolved"),
+        ("history_ms", "history_ready"),
+        ("llm_ms", "llm_done"),
+        ("format_ms", "formatted"),
+    ]
+    for label, key in ordered:
+        if key in timing:
+            parts.append(f"{label}={int((timing[key] - timing['started_at']) * 1000)}")
+    logger.info("teller_turn_timing message=%r %s", message[:120], " ".join(parts))
 
 
 def _is_repeat_last_action_request(message: str) -> bool:
@@ -800,6 +851,19 @@ def _looks_like_transfer_update(message: str, accounts: list[dict]) -> bool:
     return any(marker in lowered for marker in update_markers)
 
 
+def _looks_like_plain_account_selection(message: str, accounts: list[dict]) -> bool:
+    lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+    if not lowered:
+        return False
+    if re.fullmatch(r"#?\d{1,6}", lowered):
+        parsed_id = _parse_account_id(lowered)
+        return bool(parsed_id and next((acct for acct in accounts if acct["id"] == parsed_id), None))
+    words = lowered.split()
+    if len(words) <= 4 and _match_account(message, accounts):
+        return True
+    return False
+
+
 def _apply_transfer_currency_update(
     payload: dict,
     currency_code: str | None,
@@ -1287,6 +1351,8 @@ def _should_use_standard_teller_chat(
 
     if lower_msg in CONFIRM_WORDS or lower_msg in CANCEL_WORDS:
         return True
+    if _is_simple_greeting(message) or _is_thanks_message(message) or _is_no_thanks_message(message):
+        return True
 
     return _is_explicit_account_request(lower_msg) or _is_balance_request(lower_msg)
 
@@ -1431,6 +1497,7 @@ async def chat(
     current_user: User = Depends(get_verified_user),
 ):
     require_signature(current_user)
+    timing = _new_teller_timing()
     if not rate_limiter.check(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1440,6 +1507,7 @@ async def chat(
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
+    _mark_teller_timing(timing, "received")
 
     # Handle pending confirmations
     pending_query = (
@@ -1459,6 +1527,31 @@ async def chat(
             if pending.created_at and pending.created_at.timestamp() < cutoff:
                 pending = None
     lower_msg = message.lower().strip()
+    _mark_teller_timing(timing, "pending_checked")
+    if not pending and _is_simple_greeting(message):
+        reply = "Hi. What would you like to do?"
+        thread = (
+            db.query(TellerThread)
+            .filter(TellerThread.id == payload.thread_id, TellerThread.user_id == current_user.id)
+            .first()
+        )
+        if not thread:
+            thread = TellerThread(user_id=current_user.id, title=message[:42] or "New Teller Session")
+            db.add(thread)
+            db.commit()
+            db.refresh(thread)
+        user_message = TellerMessage(thread_id=thread.id, role="user", content=message)
+        assistant_message = TellerMessage(thread_id=thread.id, role="assistant", content=reply)
+        thread.updated_at = datetime.now(UTC)
+        db.add(user_message)
+        db.add(assistant_message)
+        db.add(thread)
+        db.commit()
+        db.refresh(user_message)
+        db.refresh(assistant_message)
+        _mark_teller_timing(timing, "state_resolved")
+        _emit_teller_timing("greeting", message, timing, used_llm=False)
+        return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if pending and lower_msg in {"continue", "continue that request", "keep going", "go ahead with that", "resume"}:
         action = (pending.action_payload or {}).get("action")
         if pending.status == "awaiting_amount" and action == "transfer":
@@ -1609,7 +1702,7 @@ async def chat(
         db.refresh(assistant_message)
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if _is_thanks_message(message):
-        reply = "You’re welcome. Glad I could help. Is there anything else I can help with right now?"
+        reply = "You’re welcome."
         thread = (
             db.query(TellerThread)
             .filter(TellerThread.id == payload.thread_id, TellerThread.user_id == current_user.id)
@@ -1629,6 +1722,32 @@ async def chat(
         db.commit()
         db.refresh(user_message)
         db.refresh(assistant_message)
+        _mark_teller_timing(timing, "state_resolved")
+        _emit_teller_timing("thanks", message, timing, used_llm=False)
+        return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
+    if not pending and (_is_no_thanks_message(message) or _is_simple_decline_message(message)):
+        reply = "Okay."
+        thread = (
+            db.query(TellerThread)
+            .filter(TellerThread.id == payload.thread_id, TellerThread.user_id == current_user.id)
+            .first()
+        )
+        if not thread:
+            thread = TellerThread(user_id=current_user.id, title=message[:42] or "New Teller Session")
+            db.add(thread)
+            db.commit()
+            db.refresh(thread)
+        user_message = TellerMessage(thread_id=thread.id, role="user", content=message)
+        assistant_message = TellerMessage(thread_id=thread.id, role="assistant", content=reply)
+        thread.updated_at = datetime.now(UTC)
+        db.add(user_message)
+        db.add(assistant_message)
+        db.add(thread)
+        db.commit()
+        db.refresh(user_message)
+        db.refresh(assistant_message)
+        _mark_teller_timing(timing, "state_resolved")
+        _emit_teller_timing("decline", message, timing, used_llm=False)
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if not pending:
         recent_deposit = _get_recent_executed_deposit(db, current_user.id, payload.thread_id)
@@ -1709,6 +1828,8 @@ async def chat(
             db.commit()
             db.refresh(user_message)
             db.refresh(assistant_message)
+            _mark_teller_timing(timing, "state_resolved")
+            _emit_teller_timing("decline", message, timing, used_llm=False)
             return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if confirmation_ready and confirmation_intent == "reject":
             pending.status = "cancelled"
@@ -2090,6 +2211,8 @@ async def chat(
         db.commit()
         db.refresh(user_message)
         db.refresh(assistant_message)
+        _mark_teller_timing(timing, "state_resolved")
+        _emit_teller_timing(action or "confirmation", message, timing, used_llm=False)
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if (
         pending
@@ -2128,6 +2251,8 @@ async def chat(
             db.commit()
             db.refresh(user_message)
             db.refresh(assistant_message)
+            _mark_teller_timing(timing, "state_resolved")
+            _emit_teller_timing("decline", message, timing, used_llm=False)
             return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
     if pending and pending.status == "awaiting_amount":
         action = (pending.action_payload or {}).get("action")
@@ -2180,7 +2305,7 @@ async def chat(
         accounts = _list_accounts(db, current_user.id)
         if action == "transfer":
             current_payload = pending.action_payload or {}
-            if _looks_like_transfer_update(message, accounts):
+            if _looks_like_transfer_update(message, accounts) and not _looks_like_plain_account_selection(message, accounts):
                 reply = _handle_pending_confirmation_edit(pending, message, db, current_user.id) or _reconfirm_pending_action(pending, db, current_user.id)
                 thread = (
                     db.query(TellerThread)
@@ -2867,6 +2992,7 @@ async def chat(
 
     accounts = _list_accounts(db, current_user.id)
     all_accounts = _list_accounts(db, current_user.id, include_inactive=True)
+    _mark_teller_timing(timing, "state_resolved")
 
     if any(phrase in lower_msg for phrase in ["rename account", "change account name", "rename my account"]):
         acct_match = None
@@ -3437,6 +3563,7 @@ async def chat(
         db.add(thread)
         db.commit()
         db.refresh(assistant_message)
+        _emit_teller_timing("transfer", message, timing, used_llm=False)
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
 
     # Detect scheduled movement intent
@@ -3532,6 +3659,7 @@ async def chat(
         db.add(thread)
         db.commit()
         db.refresh(assistant_message)
+        _emit_teller_timing("balance", message, timing, used_llm=False)
         return TellerChatResponse(thread=thread, user_message=user_message, assistant_message=assistant_message)
 
     if _is_explicit_account_request(lower_msg) and ("account" in lower_msg or "accounts" in lower_msg or "balance" in lower_msg):
@@ -3555,9 +3683,11 @@ async def chat(
         {"role": row.role, "content": row.content} for row in reversed(history) if row.role in {"user", "assistant"}
     ]
     history_payload = _build_same_user_history(db, current_user.id, thread.id, history_payload)
+    _mark_teller_timing(timing, "history_ready")
     cached, reply = await generate_teller_reply(
         current_user.id, message, history=history_payload, short_mode=bool(payload.short_mode)
     )
+    _mark_teller_timing(timing, "llm_done")
     assistant_message = TellerMessage(thread_id=thread.id, role="assistant", content=reply)
     thread.updated_at = datetime.now(UTC)
     db.add(assistant_message)
@@ -3565,6 +3695,8 @@ async def chat(
     db.commit()
     db.refresh(assistant_message)
     db.refresh(thread)
+    _mark_teller_timing(timing, "formatted")
+    _emit_teller_timing("llm", message, timing, used_llm=True)
     ensure_credit_actions(db)
     record_credit_action(db, current_user.id, "teller_message")
 

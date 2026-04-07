@@ -2,8 +2,15 @@ import pytest
 import httpx
 
 from app.services import teller_provider
+from app.services.fortune_affirmations import (
+    FORTUNE_AFFIRMATIONS_BLUEPRINT,
+    _guard_affirmation_markdown,
+    build_fortune_affirmations,
+    infer_affirmation_mode,
+)
 from app.services.teller_provider import (
     DEFAULT_TELLER_PROMPT,
+    _proof_final_reply,
     _enforce_markdown_structure,
     _extract_response_text,
     _extract_stream_completed_text,
@@ -19,6 +26,19 @@ from app.services.teller_provider import (
     get_persona,
     stream_teller_reply,
 )
+
+
+def _bullet_lines(text: str) -> list[str]:
+    return [line.strip()[2:].strip() for line in text.splitlines() if line.strip().startswith("- ")]
+
+
+def _first_non_header_line(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("##") or stripped.startswith("- "):
+            continue
+        return stripped
+    return ""
 
 
 def test_remove_repeated_sentences_preserves_list_structure_and_dedupes_duplicate_lines():
@@ -109,6 +129,125 @@ def test_get_persona_uses_compact_default_prompt():
     assert "Do NOT repeat prior wording" in prompt
 
 
+def test_fortune_affirmations_blueprint_exposes_reusable_internal_spec():
+    assert "purpose" in FORTUNE_AFFIRMATIONS_BLUEPRINT
+    assert "emotional_modes" in FORTUNE_AFFIRMATIONS_BLUEPRINT
+    assert "repetition_protection" in FORTUNE_AFFIRMATIONS_BLUEPRINT
+    assert "tone_blacklist" in FORTUNE_AFFIRMATIONS_BLUEPRINT
+
+
+@pytest.mark.parametrize(
+    ("message", "history", "topic", "expected"),
+    [
+        ("calm affirmations", None, None, "calm"),
+        ("affirmations please", [{"role": "user", "content": "I want to feel more secure with money."}], None, "money"),
+        ("affirmations please", [{"role": "user", "content": "I am stressed and overloaded."}], None, "pressure"),
+        ("affirmations please", [{"role": "user", "content": "I need to trust my voice more."}], None, "confidence"),
+        ("affirmations please", [{"role": "user", "content": "I need to lock in."}], None, "focus"),
+        ("affirmations please", [{"role": "user", "content": "I need a reset."}], None, "reset"),
+        ("affirmations please", None, None, "general"),
+    ],
+)
+def test_infer_affirmation_mode_supports_core_emotional_modes(message, history, topic, expected):
+    assert infer_affirmation_mode(message, history=history, requested_topic=topic) == expected
+
+
+def test_build_fortune_affirmations_varies_across_three_consecutive_requests():
+    first = build_fortune_affirmations(message="affirmations", requested_topic="general", history=[], variant_hint="requested")
+    second = build_fortune_affirmations(
+        message="affirmations",
+        requested_topic="general",
+        history=[
+            {"role": "assistant", "content": first},
+        ],
+        variant_hint="requested",
+    )
+    third = build_fortune_affirmations(
+        message="affirmations",
+        requested_topic="general",
+        history=[
+            {"role": "assistant", "content": first},
+            {"role": "assistant", "content": second},
+        ],
+        variant_hint="requested",
+    )
+
+    outputs = [first, second, third]
+    assert len(set(outputs)) == 3
+    bullet_lengths = [len(_bullet_lines(output)) for output in outputs]
+    assert all(3 <= count <= 5 for count in bullet_lengths)
+    assert len(set(bullet_lengths)) >= 2 or len({_first_non_header_line(output) for output in outputs}) >= 2
+
+    first_lines = [_bullet_lines(output)[0] for output in outputs if _bullet_lines(output)]
+    assert len(set(first_lines)) == len(first_lines)
+
+    all_lines = [_bullet_lines(output) for output in outputs]
+    assert set(all_lines[0]).isdisjoint(set(all_lines[1]))
+    assert set(all_lines[1]).isdisjoint(set(all_lines[2]))
+    assert set(all_lines[0]).isdisjoint(set(all_lines[2]))
+
+
+def test_build_fortune_affirmations_avoids_recent_phrase_repetition():
+    previous = "\n".join(
+        [
+            "- I let my work be compensated without shrinking around it.",
+            "- I make room for revenue by finishing what leads to payment.",
+            "- I let clean decisions support cleaner income.",
+        ]
+    )
+
+    current = build_fortune_affirmations(
+        message="affirmations please",
+        requested_topic="more money",
+        history=[{"role": "assistant", "content": previous}],
+        variant_hint="requested",
+    )
+
+    lowered = current.lower()
+    assert "i let my work be compensated without shrinking around it." not in lowered
+    assert "i make room for revenue by finishing what leads to payment." not in lowered
+
+
+def test_build_fortune_affirmations_keeps_formatting_clean_and_premium():
+    output = build_fortune_affirmations(
+        message="I need a reset",
+        requested_topic="reset",
+        history=[],
+        variant_hint="requested",
+    )
+
+    assert "- " in output
+    assert "## Insight" not in output
+    assert "## Reflection" not in output
+    lowered = output.lower()
+    for banned in ["nice.", "sweet.", "fresh set", "different angle", "tokens", "deals", "imagine", "imagined", "imaginative"]:
+        assert banned not in lowered
+
+
+def test_guard_affirmation_markdown_enforces_section_spacing_and_bullets():
+    source = "## Insight Calm is enough. ## Key Points I move clearly - I stay grounded - I trust the next step. ## Reflection What lands best?"
+
+    cleaned = _guard_affirmation_markdown(source)
+
+    assert "## Insight\n\nCalm is enough." in cleaned
+    assert "## Key Points\n\n- I move clearly\n- I stay grounded\n- I trust the next step." in cleaned
+    assert "## Reflection\n\nWhat lands best?" in cleaned
+
+
+def test_build_fortune_affirmations_avoids_instructional_insight_phrasing():
+    output = build_fortune_affirmations(
+        message="affirmations",
+        requested_topic="general",
+        history=[],
+        variant_hint="requested",
+    )
+
+    lowered = output.lower()
+    assert "use the ones that" not in lowered
+    assert "try these" not in lowered
+    assert "here are a few" not in lowered
+
+
 def test_get_repeat_count_uses_history_instead_of_cache():
     history = [
         {"role": "user", "content": "Write a Future Success Story"},
@@ -167,10 +306,11 @@ def test_light_cleanup_enforces_markdown_on_long_plaintext_coaching_reply():
 
     cleaned = _light_cleanup(source)
 
-    assert "## Insight" in cleaned
-    assert "## Key Points" in cleaned
-    assert "## Reflection" in cleaned
-    assert "- Start with a slower exhale so your body stops bracing" in cleaned or "- Then keep your attention on one clear next step" in cleaned
+    assert "## Insight" not in cleaned
+    assert "## Key Points" not in cleaned
+    assert "## Reflection" not in cleaned
+    assert "Start with a slower exhale so your body stops bracing." in cleaned
+    assert "What would help you stay with that today?" in cleaned
 
 
 def test_light_cleanup_keeps_short_confirmations_concise():
@@ -202,6 +342,25 @@ def test_light_cleanup_collapses_duplicated_followup_question_text():
     cleaned = _light_cleanup(source)
 
     assert cleaned == "Would you prefer brief, one-line calm affirmations?"
+
+
+@pytest.mark.asyncio
+async def test_proof_final_reply_runs_last_and_fixes_inline_dash_chains(monkeypatch):
+    async def fake_copyedit_reply(text, short_mode=False):
+        return "## Insight Calm can stay present. ## Key Points I stay clear - I move carefully - I trust the next step."
+
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", fake_copyedit_reply)
+
+    cleaned = await teller_provider._final_response_authority(
+        "affirmations",
+        "## Insight Calm can stay present. ## Key Points I stay clear - I move carefully - I trust the next step.",
+        history=[],
+    )
+
+    assert "## Insight" not in cleaned
+    assert "## Key Points" not in cleaned
+    assert cleaned == "- I stay clear\n- I move carefully\n- I trust the next step."
+    assert " - " not in cleaned
 
 
 def test_retry_placeholder_detection_handles_punctuation_variants():
@@ -259,7 +418,7 @@ async def test_local_rescue_rewrite_approval_delivers_rewrite_directly(monkeypat
     cached, reply = await stream_teller_reply(445566, "yes please", history=history)
 
     assert cached is False
-    assert "**Shorter Script**" in reply or "simpler version" in reply.lower()
+    assert reply.startswith("Script:") or reply.startswith("**Shorter Script**") or "simpler version" in reply.lower()
     assert "that part didn't make much sense" not in reply.lower()
 
 
@@ -312,14 +471,18 @@ async def test_stream_teller_reply_refines_affirmations_without_restarting_menu(
     cached, reply = await stream_teller_reply(667788, "more powerful", history=history)
 
     assert cached is False
-    assert "affirmation" in reply.lower()
+    assert reply.lstrip().startswith("- ")
+    assert " - " not in reply
     assert "short script" not in reply.lower()
 
 
 @pytest.mark.asyncio
-async def test_generate_teller_reply_generic_affirmations_use_dedicated_handler(monkeypatch):
-    async def fake_response(*args, **kwargs):
-        return "Stay with me. still working."
+async def test_generate_teller_reply_generic_affirmations_return_direct_set_without_two_part_followup(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_response(message, history=None, short_mode=False, repeat_count=0):
+        calls.append(message)
+        return "How many one-line affirmations would you like, and which tone. gentle, energizing, or focused?"
 
     async def passthrough_copyedit(text, short_mode=False):
         return text
@@ -332,6 +495,29 @@ async def test_generate_teller_reply_generic_affirmations_use_dedicated_handler(
     assert cached is False
     assert "- " in reply
     assert "I’m here. Please try again." not in reply
+    assert "How many one-line affirmations" not in reply
+    assert "which tone" not in reply.lower()
+    assert "gentle, energizing, or focused" not in reply.lower()
+    assert reply.count("?") <= 1
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmations_never_return_inline_dash_chains(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "## Insight Calm can stay present. ## Key Points I stay clear - I move carefully - I trust the next step."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    cached, reply = await generate_teller_reply(778021, "calm affirmations")
+
+    assert cached is False
+    assert reply.lstrip().startswith("- ")
+    assert " - " not in reply
 
 
 @pytest.mark.asyncio
@@ -356,7 +542,7 @@ async def test_generate_teller_reply_valid_brief_followup_returns_affirmations_n
 
     assert cached is False
     assert "- " in reply
-    assert "calm" in reply.lower() or "steady" in reply.lower()
+    assert reply.count("\n- ") >= 2 or reply.count("- ") >= 3
     assert "I’m here. Please try again." not in reply
     assert "Would you prefer brief, one-line calm affirmations or" not in reply
     assert "or Would you prefer brief, one-line calm affirmations or" not in reply
@@ -384,7 +570,7 @@ async def test_generate_teller_reply_affirmations_calm_then_brief_flow(monkeypat
     second_cached, second_reply = await generate_teller_reply(778003, "brief", history=history)
 
     assert second_cached is False
-    assert second_reply.count("- ") <= 2
+    assert 3 <= second_reply.count("- ") <= 5
     assert "I’m here. Please try again." not in second_reply
     assert "Would you prefer" not in second_reply
     assert second_reply.count("?") <= 1
@@ -427,6 +613,31 @@ async def test_generate_teller_reply_affirmations_sequence_has_no_duplicate_frag
     assert "Would you prefer brief, one-line calm affirmations or" not in third_reply
     assert "Would you prefer" not in third_reply
     assert third_reply.count("?") <= 1
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmation_topic_followup_gets_single_style_question(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Stay with me. still working."
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    history = [
+        {
+            "role": "assistant",
+            "content": "What kind of affirmations would help most right now: calm, confidence, focus, or finances?",
+        },
+    ]
+
+    cached, reply = await generate_teller_reply(778010, "calm", history=history)
+
+    assert cached is False
+    assert reply == "Would you prefer brief, one-line calm affirmations or a longer set?"
+    assert "I’m here. Please try again." not in reply
 
 
 @pytest.mark.asyncio
@@ -542,6 +753,122 @@ async def test_generate_teller_reply_generic_affirmations_asks_at_most_one_short
 
 
 @pytest.mark.asyncio
+async def test_generate_teller_reply_script_followup_after_one_clarification_delivers_immediately(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "What tone do you want?"
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    history = [
+        {"role": "user", "content": "script"},
+        {"role": "assistant", "content": "What kind of script would help right now?"},
+    ]
+
+    cached, reply = await generate_teller_reply(778023, "daily/weekly money check-in", history=history)
+
+    assert cached is False
+    assert "Daily:" in reply
+    assert "Weekly:" in reply
+    assert "Speak-Aloud Anchor:" in reply
+    assert "Next Step:" in reply
+    assert "What tone do you want?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_script_daily_weekly_both_delivers_both_without_extra_question(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Would you like daily or weekly?"
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    history = [
+        {"role": "user", "content": "script"},
+        {"role": "assistant", "content": "What kind of script would help right now?"},
+        {"role": "user", "content": "daily/weekly money check-in"},
+        {"role": "assistant", "content": "Do you want a daily check-in, a weekly check-in, or both?"},
+    ]
+
+    cached, reply = await generate_teller_reply(778022, "both", history=history)
+
+    assert cached is False
+    assert "Daily:" in reply
+    assert "Weekly:" in reply
+    assert "## Insight" not in reply
+    assert "Would you like daily or weekly?" not in reply
+    assert "What kind of script would help right now?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_script_request_bypasses_llm_and_returns_single_clarifier(monkeypatch):
+    async def fail_openai(*args, **kwargs):
+        raise AssertionError("LLM should not be called for script request")
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fail_openai)
+
+    cached, reply = await generate_teller_reply(880001, "script")
+
+    assert cached is False
+    assert reply.startswith("Script:")
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_affirmations_strip_legacy_sections_and_phrases(monkeypatch):
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    reply = await teller_provider._final_response_authority(
+        "affirmations",
+        "## Insight\n\nNice.\n\n## Key Points\n\nHere are a few affirmations:\n- I stay clear - I stay steady - I trust the next step.\n\n## Reflection\nPick 2–4.",
+        history=[],
+    )
+
+    assert "## Insight" not in reply
+    assert "## Key Points" not in reply
+    assert "## Reflection" not in reply
+    assert "Pick 2" not in reply
+    assert "Here are a few" not in reply
+    assert "Nice." not in reply
+    assert " - " not in reply
+    assert reply.lstrip().startswith("- ")
+
+
+@pytest.mark.asyncio
+async def test_generate_teller_reply_impatience_override_delivers_script_instead_of_asking_again(monkeypatch):
+    async def fake_response(*args, **kwargs):
+        return "Do you want a daily check-in, a weekly check-in, or both?"
+
+    async def passthrough_copyedit(text, short_mode=False):
+        return text
+
+    monkeypatch.setattr(teller_provider, "_openai_response", fake_response)
+    monkeypatch.setattr(teller_provider, "_copyedit_reply", passthrough_copyedit)
+
+    history = [
+        {"role": "user", "content": "script"},
+        {"role": "assistant", "content": "What kind of script would help right now?"},
+        {"role": "user", "content": "daily/weekly money check-in"},
+        {"role": "assistant", "content": "Do you want a daily check-in, a weekly check-in, or both?"},
+    ]
+
+    cached, reply = await generate_teller_reply(778024, "bruh come on just answer", history=history)
+
+    assert cached is False
+    assert "Daily:" in reply
+    assert "Weekly:" in reply
+    assert "Do you want a daily check-in" not in reply
+
+
+@pytest.mark.asyncio
 async def test_stream_teller_reply_shorter_transforms_previous_script(monkeypatch):
     async def fake_stream_response(*args, **kwargs):
         return "Stay with me. still working."
@@ -563,7 +890,7 @@ async def test_stream_teller_reply_shorter_transforms_previous_script(monkeypatc
     cached, reply = await stream_teller_reply(667789, "shorter", history=history)
 
     assert cached is False
-    assert "**Shorter Script**" in reply
+    assert reply.startswith("Script:")
     assert "openings" in reply.lower() or "opportunit" in reply.lower()
     assert "short script, a few affirmations, or a 2-minute reset" not in reply
 
@@ -590,8 +917,8 @@ async def test_stream_teller_reply_in_first_person_transforms_previous_script(mo
     cached, reply = await stream_teller_reply(667790, "in first person", history=history)
 
     assert cached is False
-    assert "**Script**" in reply
-    assert "\nI " in reply
+    assert reply.startswith("Script:")
+    assert "\nI " in reply or reply.startswith("Script:\nI ")
     assert "opportunit" in reply.lower() or "openings" in reply.lower()
     assert "I welcome in first person" not in reply.lower()
 
@@ -619,7 +946,7 @@ async def test_stream_teller_reply_that_didnt_hit_rewrites_previous_script(monke
 
     assert cached is False
     assert "Here’s a cleaner version." in reply or "Let me make it cleaner." in reply or "Let me restate" in reply
-    assert "**Script**" in reply
+    assert "Script:" in reply
     assert "short script, a few affirmations, or a 2-minute reset" not in reply
 
 
@@ -646,7 +973,7 @@ async def test_stream_teller_reply_script_followup_uses_first_person_and_stays_a
     cached, reply = await stream_teller_reply(667792, "script", history=history)
 
     assert cached is False
-    assert "**Script**" in reply
+    assert reply.startswith("Script:")
     assert "I " in reply
     assert "in front of you" not in reply.lower()
     assert "short script, a few affirmations, or a 2-minute reset" not in reply
@@ -727,7 +1054,7 @@ async def test_stream_teller_reply_task_switch_then_scriot_stays_on_script_path(
     cached, reply = await stream_teller_reply(667796, "scriot", history=history)
 
     assert cached is False
-    assert "**Script**" in reply
+    assert reply.startswith("Script:")
     assert "transfer" not in reply.lower()
     assert "Which account should I transfer from?" not in reply
 
@@ -776,12 +1103,12 @@ async def test_stream_teller_reply_repeated_script_requests_change_wording(monke
     cached, second = await stream_teller_reply(667798, "script", history=history)
     assert cached is False
     assert first != second
-    assert "**Script**" in first and "**Script**" in second
+    assert first.startswith("Script:") and second.startswith("Script:")
     history.extend([{"role": "user", "content": "script"}, {"role": "assistant", "content": second}])
     cached, third = await stream_teller_reply(667798, "script", history=history)
     assert cached is False
     assert third not in {first, second}
-    assert "**Script**" in third
+    assert third.startswith("Script:")
 
 
 @pytest.mark.asyncio
@@ -801,7 +1128,7 @@ async def test_stream_teller_reply_mixed_affirmation_request_persists_artifact_f
 
     cached, first = await stream_teller_reply(667880, "give affirmations for new paying signature members shorter")
     assert cached is False
-    assert "affirmations" in first.lower()
+    assert first.lstrip().startswith("- ")
     assert first.count("- ") >= 2
 
     history = [
@@ -810,9 +1137,9 @@ async def test_stream_teller_reply_mixed_affirmation_request_persists_artifact_f
     ]
     cached, second = await stream_teller_reply(667880, "more powerful", history=history)
     assert cached is False
-    assert "affirmations" in second.lower()
+    assert second.lstrip().startswith("- ")
     assert "short script, a few affirmations, or a 2-minute reset" not in second
-    assert "premium" in second.lower() or "commitment" in second.lower() or "stronger version" in second.lower()
+    assert "premium" in second.lower() or "commitment" in second.lower() or second.count("- ") >= 3
 
 
 @pytest.mark.asyncio
@@ -836,7 +1163,7 @@ async def test_stream_teller_reply_another_after_script_returns_new_script_varia
     history.extend([{"role": "user", "content": "script please"}, {"role": "assistant", "content": first}])
     cached, second = await stream_teller_reply(667881, "another", history=history)
     assert cached is False
-    assert "**Script**" in second
+    assert second.startswith("Script:")
     assert second != first
     assert "clarify" not in second.lower()
 
@@ -1023,7 +1350,7 @@ async def test_stream_teller_reply_script_after_story_asks_one_clarifying_questi
     cached, reply = await stream_teller_reply(667884, "script", history=history)
 
     assert cached is False
-    assert reply == "Do you want a script about money, or based on that story?"
+    assert reply.startswith("Script:")
 
 
 @pytest.mark.asyncio
@@ -1047,7 +1374,7 @@ async def test_stream_teller_reply_another_script_generates_new_script_immediate
     cached, reply = await stream_teller_reply(6678841, "another script", history=history)
 
     assert cached is False
-    assert "**Script**" in reply
+    assert reply.startswith("Script:")
     assert "what would you like" not in reply.lower()
     assert "short script, a few affirmations, or a 2-minute reset" not in reply.lower()
 
@@ -1115,7 +1442,7 @@ async def test_stream_teller_reply_script_after_action_switch_does_not_use_actio
     cached, reply = await stream_teller_reply(667794, "actually wait give me a script first")
 
     assert cached is False
-    assert "**Script**" in reply
+    assert reply.startswith("Script:")
     assert "transfer 1000" not in reply.lower()
     assert "I am available for transfer" not in reply.lower()
 
@@ -1187,7 +1514,7 @@ async def test_stream_teller_reply_copyeditor_preserves_markdown_structure(monke
     cached, reply = await stream_teller_reply(887766, "help me")
 
     assert cached is False
-    assert "## Insight" in reply
+    assert "## Insight" not in reply
     assert "Steady next steps." in reply
     assert "- first step" in reply
 
@@ -1214,6 +1541,7 @@ async def test_stream_teller_reply_uses_openai_stream_for_normal_prompts(monkeyp
 
     assert cached is False
     assert "You can relax into wealth." in reply
+    assert "## Insight" not in reply
     assert deltas
 
 
@@ -1236,6 +1564,7 @@ async def test_stream_teller_reply_falls_back_to_standard_reply_when_stream_retu
 
     assert cached is False
     assert "You can relax into wealth one steady breath at a time." in reply
+    assert "## Insight" not in reply
     assert "Fortune is thinking…" not in reply
 
 
@@ -1279,8 +1608,8 @@ async def test_stream_teller_reply_uses_minimal_affirmation_rescue_reply_when_bo
     cached, reply = await stream_teller_reply(135791, "Affirmations for new signature members influx in my app")
 
     assert cached is False
-    assert "Here are a few affirmations:" in reply
-    assert "- " in reply
+    assert reply.lstrip().startswith("- ")
+    assert reply.count("- ") >= 2
 
 
 @pytest.mark.asyncio
@@ -1301,7 +1630,7 @@ async def test_stream_teller_reply_uses_script_rescue_reply_for_script_prompt_wh
     cached, reply = await stream_teller_reply(112233, "HI there. Script new opportunities")
 
     assert cached is False
-    assert "**Script**" in reply
+    assert reply.startswith("Script:")
     assert "opportunit" in reply.lower()
     assert "Stay with me" not in reply
     assert "You can soften into hi there" not in reply
@@ -1331,8 +1660,7 @@ async def test_stream_teller_reply_uses_history_aware_longer_reply_after_script_
     cached, reply = await stream_teller_reply(445566, "longer", history=history)
 
     assert cached is False
-    assert "**Script**" in reply
-    assert "**Script**" in reply
+    assert "Script:" in reply
     assert "You can soften into longer" not in reply
 
 
@@ -1359,7 +1687,7 @@ async def test_stream_teller_reply_uses_history_aware_shorter_reply_after_script
     cached, reply = await stream_teller_reply(556677, "shorter", history=history)
 
     assert cached is False
-    assert "**Shorter Script**" in reply
+    assert reply.startswith("Script:")
     assert "connections" in reply.lower() or "right connections" in reply.lower()
     assert "you can soften" not in reply.lower()
 
@@ -1519,7 +1847,7 @@ async def test_stream_teller_reply_turns_money_followup_choice_into_affirmations
     cached, reply = await stream_teller_reply(202403, "a few affirmations,", history=history)
 
     assert cached is False
-    assert "Here are a few affirmations:" in reply or "Use the ones that feel believable enough to repeat." in reply
+    assert reply.lstrip().startswith("- ")
     assert "Do you want me to turn that into a short script, a few affirmations, or a 2-minute reset?" not in reply
     assert "Good. a few affirmations" not in reply
     assert "can become a strong anchor" not in reply

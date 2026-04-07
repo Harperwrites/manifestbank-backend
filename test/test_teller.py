@@ -2,6 +2,7 @@ import pytest
 from uuid import uuid4
 from app.models.user import User
 from app.services.teller_provider import rate_limiter
+from app.routes import teller as teller_route
 
 
 async def _safe_login(client, db, email_prefix: str):
@@ -286,6 +287,230 @@ async def test_teller_transfer_flow_collects_from_then_to_account(client, auth_h
 
 
 @pytest.mark.asyncio
+async def test_teller_balance_fast_path_does_not_invoke_provider(client, db, monkeypatch):
+    token = await _safe_login(client, db, "teller_balance_fast")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    checking = await client.post("/accounts", json={"name": "Checking", "account_type": "personal", "currency": "USD"}, headers=headers)
+    savings = await client.post("/accounts", json={"name": "Savings", "account_type": "personal", "currency": "USD"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": checking.json()["id"], "direction": "credit", "amount": "450.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": savings.json()["id"], "direction": "credit", "amount": "1200.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    async def fail_provider(*args, **kwargs):
+        raise AssertionError("provider should not be called for balance")
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fail_provider)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "balance"}, headers=headers)
+
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert "**Your account balances**" in content
+    assert "- Checking: $450.00" in content
+    assert "- Savings: $1,200.00" in content
+
+
+@pytest.mark.asyncio
+async def test_teller_balance_fast_path_logs_used_llm_false_and_no_provider_timing(client, db, monkeypatch, caplog):
+    token = await _safe_login(client, db, "teller_balance_logs")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    checking = await client.post("/accounts", json={"name": "Checking", "account_type": "personal", "currency": "USD"}, headers=headers)
+    await client.post("/ledger/entries", json={"account_id": checking.json()["id"], "direction": "credit", "amount": "450.00", "currency": "USD", "entry_type": "deposit", "status": "posted"}, headers=headers)
+
+    async def fail_provider(*args, **kwargs):
+        raise AssertionError("provider should not be called for balance logging path")
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fail_provider)
+
+    with caplog.at_level("INFO", logger="teller"):
+        response = await client.post("/teller/chat", json={"thread_id": None, "message": "balance"}, headers=headers)
+
+    assert response.status_code == 200
+    log_text = "\n".join(caplog.messages)
+    assert "teller_turn_timing" in log_text
+    assert "kind=balance" in log_text
+    assert "used_llm=false" in log_text
+    assert "teller_provider_timing" not in log_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message,expected", [("no thanks", "Okay."), ("cancel", "Okay."), ("stop", "Okay.")])
+async def test_teller_no_thanks_fast_path_stays_unformatted(client, db, monkeypatch, message, expected):
+    token = await _safe_login(client, db, "teller_nothanks_fast")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def fail_provider(*args, **kwargs):
+        raise AssertionError("provider should not be called for no thanks")
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fail_provider)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": message}, headers=headers)
+
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert content == expected
+    assert "## Insight" not in content
+    assert "## Key Points" not in content
+    assert "## Reflection" not in content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["thank you", "thanks", "thank ypu"])
+async def test_teller_thank_you_fast_path_stays_unformatted(client, db, monkeypatch, message):
+    token = await _safe_login(client, db, "teller_thanks_fast")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def fail_provider(*args, **kwargs):
+        raise AssertionError("provider should not be called for thank you")
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fail_provider)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": message}, headers=headers)
+
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert content == "You’re welcome."
+    assert "## Insight" not in content
+    assert "## Key Points" not in content
+    assert "## Reflection" not in content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["yes", "yes please"])
+async def test_teller_pending_transfer_confirmation_bypasses_provider(client, db, monkeypatch, message, caplog):
+    token = await _safe_login(client, db, "teller_pending_yes_fast")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    miracles = await client.post("/accounts", json={"name": "Miracles", "account_type": "personal", "currency": "USD"}, headers=headers)
+    wealth = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+
+    async def fail_provider(*args, **kwargs):
+        raise AssertionError("provider should not be called for pending confirmation")
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fail_provider)
+
+    first = await client.post(
+        "/teller/chat",
+        json={"thread_id": None, "message": f"transfer 2500 from #{miracles.json()['id']} to #{wealth.json()['id']}"},
+        headers=headers,
+    )
+    thread_id = first.json()["thread"]["id"]
+
+    with caplog.at_level("INFO", logger="teller"):
+        confirmed = await client.post("/teller/chat", json={"thread_id": thread_id, "message": message}, headers=headers)
+
+    assert confirmed.status_code == 200
+    assert "Done. I transferred $2,500.00" in confirmed.json()["assistant_message"]["content"]
+    log_text = "\n".join(caplog.messages)
+    assert "used_llm=false" in log_text
+    assert "teller_provider_timing" not in log_text
+
+
+@pytest.mark.asyncio
+async def test_teller_transfer_awaiting_account_accepts_numeric_ids_without_reasking_source(client, db):
+    token = await _safe_login(client, db, "teller_numeric_ids")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    wealth = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+    splurge = await client.post("/accounts", json={"name": "Splurge", "account_type": "personal", "currency": "USD"}, headers=headers)
+    travel = await client.post("/accounts", json={"name": "Travel", "account_type": "personal", "currency": "USD"}, headers=headers)
+
+    first = await client.post("/teller/chat", json={"thread_id": None, "message": "transfer"}, headers=headers)
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert first.json()["assistant_message"]["content"] == "What amount should I transfer?"
+
+    second = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "1000"}, headers=headers)
+    assert second.status_code == 200
+    assert "Which account should I transfer from?" in second.json()["assistant_message"]["content"]
+
+    third = await client.post("/teller/chat", json={"thread_id": thread_id, "message": str(splurge.json()["id"])}, headers=headers)
+    assert third.status_code == 200
+    third_content = third.json()["assistant_message"]["content"]
+    assert "Which account should I transfer to?" in third_content
+    assert "Which account should I transfer from?" not in third_content
+
+    fourth = await client.post("/teller/chat", json={"thread_id": thread_id, "message": str(wealth.json()["id"])}, headers=headers)
+    assert fourth.status_code == 200
+    assert f"Confirm transfer $1,000.00 from “Splurge” to “Wealth Builder”?" in fourth.json()["assistant_message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_teller_transfer_awaiting_account_accepts_account_name_without_reasking_source(client, db):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_account_name_fast")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    wealth = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+    splurge = await client.post("/accounts", json={"name": "Splurge", "account_type": "personal", "currency": "USD"}, headers=headers)
+
+    first = await client.post("/teller/chat", json={"thread_id": None, "message": "transfer"}, headers=headers)
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert first.json()["assistant_message"]["content"] == "What amount should I transfer?"
+
+    second = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "1000"}, headers=headers)
+    assert second.status_code == 200
+    assert "Which account should I transfer from?" in second.json()["assistant_message"]["content"]
+
+    third = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Splurge"}, headers=headers)
+    assert third.status_code == 200
+    third_content = third.json()["assistant_message"]["content"]
+    assert "Which account should I transfer to?" in third_content
+    assert "Which account should I transfer from?" not in third_content
+
+    fourth = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Wealth"}, headers=headers)
+    assert fourth.status_code == 200
+    assert f"Confirm transfer $1,000.00 from “Splurge” to “Wealth Builder”?" in fourth.json()["assistant_message"]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["no thanks", "no", "nope", "nah", "cancel", "stop"])
+async def test_teller_no_thanks_cancels_pending_transfer_immediately(client, db, message):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_no_thanks_pending")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    miracles = await client.post("/accounts", json={"name": "Miracles", "account_type": "personal", "currency": "USD"}, headers=headers)
+    wealth = await client.post("/accounts", json={"name": "Wealth Builder", "account_type": "wealth_builder", "currency": "USD"}, headers=headers)
+
+    first = await client.post(
+        "/teller/chat",
+        json={"thread_id": None, "message": f"transfer 2500 from #{miracles.json()['id']} to #{wealth.json()['id']}"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    thread_id = first.json()["thread"]["id"]
+    assert "Confirm transfer $2,500.00" in first.json()["assistant_message"]["content"]
+
+    declined = await client.post("/teller/chat", json={"thread_id": thread_id, "message": message}, headers=headers)
+    assert declined.status_code == 200
+    assert declined.json()["assistant_message"]["content"] == "Got it. I canceled that transfer."
+
+
+@pytest.mark.asyncio
+async def test_teller_affirmations_still_use_provider_path(client, db, monkeypatch):
+    rate_limiter.buckets.clear()
+    token = await _safe_login(client, db, "teller_affirmations_provider")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def fake_provider(user_id, message, history=None, short_mode=False):
+        assert message == "affirmations"
+        return False, "- I trust the pace that lets me stay clear.\n- I let calm support follow-through.\n- I keep my attention where it helps.\n"
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fake_provider)
+
+    response = await client.post("/teller/chat", json={"thread_id": None, "message": "affirmations"}, headers=headers)
+
+    assert response.status_code == 200
+    content = response.json()["assistant_message"]["content"]
+    assert content.lstrip().startswith("- ")
+    assert "## Insight" not in content
+    assert "## Reflection" not in content
+
+
+@pytest.mark.asyncio
 async def test_teller_transfer_accepts_typoish_account_name_matches(client, auth_helper):
     rate_limiter.buckets.clear()
     suffix = uuid4().hex[:8]
@@ -450,10 +675,7 @@ async def test_teller_thanks_reply_uses_clean_grammar(client, auth_helper):
 
     thanks = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "thank you"}, headers=headers)
     assert thanks.status_code == 200
-    assert (
-        thanks.json()["assistant_message"]["content"]
-        == "You’re welcome. Glad I could help. Is there anything else I can help with right now?"
-    )
+    assert thanks.json()["assistant_message"]["content"] == "You’re welcome."
 
 
 @pytest.mark.asyncio
@@ -721,7 +943,7 @@ async def test_teller_transfer_parses_shorthand_amounts_and_gbp_preference(clien
 
 
 @pytest.mark.asyncio
-async def test_teller_can_pause_action_for_script_request_without_continue_cancel_loop(client, db):
+async def test_teller_can_pause_action_for_script_request_without_continue_cancel_loop(client, db, monkeypatch):
     rate_limiter.buckets.clear()
     token = await _safe_login(client, db, "teller_pause")
     headers = {"Authorization": f"Bearer {token}"}
@@ -731,6 +953,11 @@ async def test_teller_can_pause_action_for_script_request_without_continue_cance
     first = await client.post("/teller/chat", json={"thread_id": None, "message": "transfer 1000"}, headers=headers)
     thread_id = first.json()["thread"]["id"]
     assert "Which account should I transfer from?" in first.json()["assistant_message"]["content"]
+
+    async def fake_provider(user_id, message, history=None, short_mode=False):
+        return False, "Script:\n\nDaily:\n- What paid move matters most today?\n- What needs a direct answer?\n- What would make today cleaner by tonight?\n\nSpeak-Aloud Anchor:\n- I move the next paid step clearly.\n\nNext Step:\n- Block ten focused minutes for the one money move that matters."
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fake_provider)
 
     second = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "actually wait give me a script first"}, headers=headers)
     assert second.status_code == 200
@@ -934,7 +1161,7 @@ async def test_teller_deposit_with_specified_account_only_asks_for_confirmation(
 
 
 @pytest.mark.asyncio
-async def test_teller_deposit_without_account_then_account_followup_then_yes(client, db):
+async def test_teller_deposit_without_account_then_account_followup_then_yes(client, db, monkeypatch):
     rate_limiter.buckets.clear()
     token = await _safe_login(client, db, "tellerdeposittwo")
     headers = {"Authorization": f"Bearer {token}"}
@@ -954,6 +1181,11 @@ async def test_teller_deposit_without_account_then_account_followup_then_yes(cli
     third = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Yes"}, headers=headers)
     assert third.status_code == 200
     assert "Done. I deposited $15,000.00 into “Wealth Builder”." in third.json()["assistant_message"]["content"]
+
+    async def fake_provider(user_id, message, history=None, short_mode=False):
+        return False, "What would you like to do next?"
+
+    monkeypatch.setattr(teller_route, "generate_teller_reply", fake_provider)
 
     fourth = await client.post("/teller/chat", json={"thread_id": thread_id, "message": "Yes"}, headers=headers)
     assert fourth.status_code == 200

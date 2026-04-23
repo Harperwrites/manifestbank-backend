@@ -68,17 +68,6 @@ def _email_shell(
               <td align="center">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
                   <tr>
-                    <td align="center" style="padding:0 0 6px;">
-                      <img
-                        src="https://manifestbank.app/manifestbank-app-logo-latest.png"
-                        alt="ManifestBank™"
-                        width="104"
-                        height="104"
-                        style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:104px;"
-                      />
-                    </td>
-                  </tr>
-                  <tr>
                     <td
                       bgcolor="#fffaf5"
                       style="border-radius:28px;background-color:#fffaf5;border:1px solid #d9c5ba;box-shadow:0 14px 34px rgba(77,49,40,0.12);font-family:'Helvetica Neue',Arial,sans-serif;color:#261b16;overflow:hidden;"

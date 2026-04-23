@@ -6,6 +6,7 @@ Create Date: 2026-03-29
 """
 
 from alembic import op
+import sqlalchemy as sa
 
 revision = "f4b5c6d7e8f9"
 down_revision = "b34cd56ef78a"
@@ -14,20 +15,26 @@ depends_on = None
 
 
 def upgrade():
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ether_message_likes (
-            id SERIAL PRIMARY KEY,
-            message_id INTEGER NOT NULL REFERENCES ether_messages (id),
-            profile_id INTEGER NOT NULL REFERENCES profiles (id),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT uq_ether_message_like UNIQUE (message_id, profile_id)
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if not inspector.has_table("ether_message_likes"):
+        op.create_table(
+            "ether_message_likes",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column("message_id", sa.Integer(), sa.ForeignKey("ether_messages.id"), nullable=False),
+            sa.Column("profile_id", sa.Integer(), sa.ForeignKey("profiles.id"), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.UniqueConstraint("message_id", "profile_id", name="uq_ether_message_like"),
         )
-        """
-    )
-    op.execute("CREATE INDEX IF NOT EXISTS ix_ether_message_likes_message_id ON ether_message_likes (message_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_ether_message_likes_profile_id ON ether_message_likes (profile_id)")
+
+    existing_indexes = {index["name"] for index in inspector.get_indexes("ether_message_likes")}
+    if "ix_ether_message_likes_message_id" not in existing_indexes:
+        op.create_index("ix_ether_message_likes_message_id", "ether_message_likes", ["message_id"])
+    if "ix_ether_message_likes_profile_id" not in existing_indexes:
+        op.create_index("ix_ether_message_likes_profile_id", "ether_message_likes", ["profile_id"])
 
 
 def downgrade():
-    op.execute("DROP TABLE IF EXISTS ether_message_likes")
+    op.drop_index("ix_ether_message_likes_profile_id", table_name="ether_message_likes")
+    op.drop_index("ix_ether_message_likes_message_id", table_name="ether_message_likes")
+    op.drop_table("ether_message_likes")

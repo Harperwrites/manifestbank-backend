@@ -15,7 +15,7 @@ from app.services import email as email_service
             [
                 "Verify your ManifestBank email",
                 "Email Verification",
-                "manifestbank-app-logo-latest.png",
+                "manifestbank-icon-192.png",
                 "Verify email",
                 "/verify-email?token=verify-token",
             ],
@@ -92,8 +92,11 @@ def test_branded_email_templates_render_shared_shell(monkeypatch, fn_name, kwarg
     html = recorder.html
     assert html is not None
     assert '<meta charset="utf-8" />' in html
+    assert '<meta name="color-scheme" content="light only" />' in html
     assert "ManifestBank™ is a" in html
     assert "ManifestBankâ" not in html
+    assert "color:#241814 !important" in html
+    assert "-webkit-text-fill-color:#241814" in html
     assert "background-image:url('https://manifestbank.app/marble-veins.png')" in html
     for fragment in expected_fragments:
         assert fragment in html

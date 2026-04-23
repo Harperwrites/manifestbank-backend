@@ -20,7 +20,7 @@ def _button(url: str, label: str) -> str:
     return f"""
     <a
       href="{escape(url, quote=True)}"
-      style="display:inline-block;padding:12px 20px;border-radius:999px;text-decoration:none;background:linear-gradient(135deg, #c88a77, #b67967);color:#ffffff;font-weight:700;letter-spacing:0.01em;"
+      style="display:inline-block;padding:12px 20px;border-radius:999px;text-decoration:none;background:#b86f5f;color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-weight:700;letter-spacing:0.01em;"
     >
       {escape(label)}
     </a>
@@ -29,7 +29,7 @@ def _button(url: str, label: str) -> str:
 
 def _info_card(content: str) -> str:
     return f"""
-    <div style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#f7f1eb;border:1px solid rgba(182,121,103,0.18);">
+    <div class="mb-dark-card" style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#2b211d !important;color:#f9eee7 !important;-webkit-text-fill-color:#f9eee7;border:1px solid rgba(43,33,29,0.28);">
       {content}
     </div>
     """
@@ -52,35 +52,71 @@ def _email_shell(
         <meta charset="utf-8" />
         <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light only" />
+        <meta name="supported-color-schemes" content="light" />
         <title>{escape(heading)}</title>
+        <style>
+          :root {{ color-scheme: light only; supported-color-schemes: light; }}
+          body, table, td, div, p, span, li {{ color-scheme: light only; }}
+          .mb-card, .mb-card div, .mb-card p, .mb-card li {{
+            color:#2b211d !important;
+            -webkit-text-fill-color:#2b211d !important;
+          }}
+          .mb-eyebrow {{
+            color:#9b5f51 !important;
+            -webkit-text-fill-color:#9b5f51 !important;
+          }}
+          .mb-heading {{
+            color:#241814 !important;
+            -webkit-text-fill-color:#241814 !important;
+          }}
+          .mb-muted, .mb-muted div {{
+            color:#6e554c !important;
+            -webkit-text-fill-color:#6e554c !important;
+          }}
+          .mb-dark-card, .mb-dark-card div, .mb-dark-card strong {{
+            color:#f9eee7 !important;
+            -webkit-text-fill-color:#f9eee7 !important;
+          }}
+          a {{
+            color:#1f6fc7 !important;
+            -webkit-text-fill-color:#1f6fc7 !important;
+          }}
+          .mb-button {{
+            color:#ffffff !important;
+            -webkit-text-fill-color:#ffffff !important;
+          }}
+        </style>
       </head>
-      <body style="margin:0;padding:0;background:#1a1411;">
-        <div style="margin:0;padding:32px 16px;background:#1a1411;background-image:radial-gradient(circle at top, rgba(182,121,103,0.18), transparent 42%);">
+      <body bgcolor="#efe2db" style="margin:0;padding:0;background:#efe2db;color:#2b211d;">
+        <div style="margin:0;padding:18px 14px;background:#efe2db;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
             <tr>
               <td align="center">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
                   <tr>
-                    <td align="center" style="padding:0 0 18px;">
+                    <td align="center" style="padding:0 0 8px;">
                       <img
-                        src="https://manifestbank.app/manifestbank-app-logo-latest.png"
+                        src="https://manifestbank.app/manifestbank-icon-192.png"
                         alt="ManifestBank™"
-                        width="118"
-                        height="118"
-                        style="display:block;border:0;outline:none;text-decoration:none;width:118px;height:118px;"
+                        width="92"
+                        height="92"
+                        style="display:block;border:0;outline:none;text-decoration:none;width:92px;height:92px;border-radius:24px;"
                       />
                     </td>
                   </tr>
                   <tr>
                     <td
-                      style="padding:34px 32px;border-radius:28px;background:#fbf8f3;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border:1px solid rgba(182,121,103,0.22);box-shadow:0 24px 54px rgba(8,6,6,0.28);font-family:'Helvetica Neue',Arial,sans-serif;color:#2b2320;"
+                      class="mb-card"
+                      bgcolor="#fffaf5"
+                      style="padding:34px 32px;border-radius:28px;background-color:#fffaf5;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border:1px solid rgba(124,84,72,0.26);box-shadow:0 14px 34px rgba(77,49,40,0.14);font-family:'Helvetica Neue',Arial,sans-serif;color:#2b211d !important;-webkit-text-fill-color:#2b211d;"
                     >
-                      <div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8a6557;margin:0 0 14px;">{escape(eyebrow)}</div>
-                      <div style="font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.08;color:#2d211c;margin:0 0 16px;">{escape(heading)}</div>
-                      <div style="font-size:16px;line-height:1.72;color:#4a3a32;">{body_html}</div>
+                      <div class="mb-eyebrow" style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#9b5f51 !important;-webkit-text-fill-color:#9b5f51;margin:0 0 14px;">{escape(eyebrow)}</div>
+                      <div class="mb-heading" style="font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.08;color:#241814 !important;-webkit-text-fill-color:#241814;margin:0 0 16px;">{escape(heading)}</div>
+                      <div style="font-size:16px;line-height:1.72;color:#2b211d !important;-webkit-text-fill-color:#2b211d;">{body_html}</div>
                       {f'<div style="margin:24px 0 0;">{cta_html}</div>' if cta_html else ''}
                       {utility_html or ''}
-                      <div style="margin-top:26px;padding-top:18px;border-top:1px solid rgba(138,101,87,0.18);font-size:12px;line-height:1.6;color:#7a675d;">
+                      <div class="mb-muted" style="margin-top:26px;padding-top:18px;border-top:1px solid rgba(138,101,87,0.22);font-size:12px;line-height:1.6;color:#6e554c !important;-webkit-text-fill-color:#6e554c;">
                         <div>{escape(footer)}</div>
                         <div style="margin-top:8px;">Sent {_stamp()}</div>
                       </div>

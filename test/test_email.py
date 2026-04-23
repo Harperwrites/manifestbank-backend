@@ -15,7 +15,7 @@ from app.services import email as email_service
             [
                 "Verify your ManifestBank email",
                 "Email Verification",
-                "manifestbank-icon-192.png",
+                "manifestbank-app-logo-latest.png",
                 "Verify email",
                 "/verify-email?token=verify-token",
             ],

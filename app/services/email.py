@@ -70,11 +70,11 @@ def _email_shell(
                   <tr>
                     <td align="center" style="padding:0 0 6px;">
                       <img
-                        src="https://manifestbank.app/manifestbank-icon-192.png"
+                        src="https://manifestbank.app/manifestbank-app-logo-latest.png"
                         alt="ManifestBank™"
-                        width="82"
-                        height="82"
-                        style="display:block;border:0;outline:none;text-decoration:none;width:82px;height:82px;border-radius:22px;"
+                        width="104"
+                        height="104"
+                        style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:104px;"
                       />
                     </td>
                   </tr>

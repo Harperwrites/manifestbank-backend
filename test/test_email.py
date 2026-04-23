@@ -48,6 +48,19 @@ from app.services import email as email_service
                 "Open My Line",
             ],
         ),
+        (
+            "send_signature_welcome_email",
+            {"to_email": "member@test.com", "username": "Nova"},
+            "Welcome to ManifestBank™ Signature ✨",
+            [
+                "Welcome to ManifestBank™ Signature",
+                "Signature Welcome",
+                "You didn’t just upgrade. You elevated.",
+                "Fortune is evolving in real time.",
+                "Enter Signature",
+                "/dashboard",
+            ],
+        ),
     ],
 )
 def test_branded_email_templates_render_shared_shell(monkeypatch, fn_name, kwargs, expected_subject, expected_fragments):

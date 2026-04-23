@@ -271,6 +271,41 @@ def send_subscription_alert_email(to_email: str, user_email: str, username: str 
     return _send_email(to_email, "New ManifestBank™ Signature Member", html)
 
 
+def send_signature_welcome_email(to_email: str, username: str | None) -> bool:
+    display = username or to_email.split("@")[0]
+    body_html = f"""
+    <p style="margin:0 0 12px;">Welcome to <strong>ManifestBank™ Signature</strong>, {escape(display)}.</p>
+    <p style="margin:0 0 12px;">You didn’t just upgrade. You elevated.</p>
+    <p style="margin:0 0 12px;">Signature is where intention becomes structured, where clarity compounds, and where your relationship with wealth moves with precision instead of chance. You now have access to a deeper layer of ManifestBank™: one designed for those who move differently.</p>
+    <p style="margin:0 0 12px;">Inside Signature, you’ll notice:</p>
+    <ul style="margin:0 0 18px 20px;padding:0;">
+      <li style="margin:0 0 8px;">A more refined financial view: clean, expanded, and aligned with your vision.</li>
+      <li style="margin:0 0 8px;">Advanced tools that respond to your decisions, not just your deposits.</li>
+      <li style="margin:0;">A space where your mindset and your money finally speak the same language.</li>
+    </ul>
+    {_info_card("<strong>This is your environment now.</strong><br/>Use it intentionally. Move with certainty.")}
+    <p style="margin:0 0 12px;">And remember: this isn’t about watching numbers. It’s about becoming the version of you those numbers naturally follow.</p>
+    <p style="margin:0 0 12px;">If you ever want to go further, refine faster, or unlock more precision within your system, it’s all here waiting for you.</p>
+    <p style="margin:0 0 12px;">Let’s build something inevitable.</p>
+    <p style="margin:0;">— ManifestBank™</p>
+    """
+    utility_html = """
+    <div style="margin-top:20px;padding:12px 14px;border-radius:16px;background:rgba(45,33,28,0.06);font-size:13px;line-height:1.55;color:#6f5a51;">
+      Fortune is evolving in real time. Early access: continuously improving intelligence.
+    </div>
+    """
+    html = _email_shell(
+        eyebrow="Signature Welcome",
+        heading="Welcome to ManifestBank™ Signature",
+        body_html=body_html,
+        cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/dashboard", "Enter Signature"),
+        utility_html=utility_html,
+        footer_note="ManifestBank™ is a wealth visualization and reflection platform. It is not a financial institution.",
+    )
+
+    return _send_email(to_email, "Welcome to ManifestBank™ Signature ✨", html)
+
+
 def send_trial_grant_email(to_email: str, username: str | None, trial_days: int) -> bool:
     display = username or to_email.split("@")[0]
     body_html = f"""

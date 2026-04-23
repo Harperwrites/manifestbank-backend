@@ -13,6 +13,8 @@ def main() -> None:
     settings.FRONTEND_BASE_URL = "https://manifestbank.app"
     output_dir = Path("tmp/email-previews")
     output_dir.mkdir(parents=True, exist_ok=True)
+    for stale_preview in output_dir.glob("*.html"):
+        stale_preview.unlink()
     rendered: list[tuple[str, str, str]] = []
 
     def capture(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
@@ -26,6 +28,7 @@ def main() -> None:
     email_service.send_verification_email("member@example.com", "preview-verify-token")
     email_service.send_password_reset_email("member@example.com", "preview-reset-token")
     email_service.send_trial_grant_email("member@example.com", "Nova", 14)
+    email_service.send_signature_welcome_email("member@example.com", "Nova")
     email_service.send_myline_message_email(
         "member@example.com",
         "Fortune",

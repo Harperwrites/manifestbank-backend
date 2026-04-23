@@ -29,6 +29,7 @@ class User(Base):
     stripe_current_period_end = Column(DateTime(timezone=True), nullable=True)
     stripe_trial_end = Column(DateTime(timezone=True), nullable=True)
     stripe_cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    signature_welcome_email_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     dashboard_currency = Column(String, nullable=False, default="USD")
 

@@ -7,7 +7,7 @@ from app.core.security import get_verified_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.services.email import send_subscription_alert_email
+from app.services.email import send_signature_welcome_email, send_subscription_alert_email
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -28,6 +28,34 @@ def _price_for_plan(plan: str | None) -> str:
             raise HTTPException(status_code=500, detail="Stripe annual price not configured")
         return settings.STRIPE_PRICE_ANNUAL
     raise HTTPException(status_code=400, detail="Invalid plan. Use 'monthly' or 'annual'.")
+
+
+def _subscription_price_id(subscription: dict) -> str | None:
+    return (
+        subscription.get("items", {})
+        .get("data", [{}])[0]
+        .get("price", {})
+        .get("id")
+    )
+
+
+def _is_signature_subscription(subscription: dict | None, metadata: dict | None = None) -> bool:
+    metadata = metadata or {}
+    subscription_metadata = (subscription or {}).get("metadata") or {}
+    tier = metadata.get("tier_name") or subscription_metadata.get("tier_name")
+    if tier == "signature":
+        return True
+    price_id = _subscription_price_id(subscription or {})
+    signature_prices = {settings.STRIPE_PRICE_MONTHLY, settings.STRIPE_PRICE_ANNUAL}
+    return bool(price_id and price_id in signature_prices)
+
+
+def _paid_amount_cents(data: dict) -> int:
+    for key in ("amount_paid", "amount_total", "amount_due"):
+        value = data.get(key)
+        if isinstance(value, int):
+            return value
+    return 0
 
 
 @router.post("/checkout-session")
@@ -125,21 +153,16 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     event_type = event.get("type")
     data = event.get("data", {}).get("object", {})
 
-    def update_user_from_subscription(subscription: dict):
+    def update_user_from_subscription(subscription: dict) -> User | None:
         customer_id = subscription.get("customer")
         if not customer_id:
-            return
+            return None
         user_obj = db.query(User).filter(User.stripe_customer_id == customer_id).first()
         if not user_obj:
-            return
+            return None
         user_obj.stripe_subscription_id = subscription.get("id")
         user_obj.stripe_status = subscription.get("status")
-        user_obj.stripe_price_id = (
-            subscription.get("items", {})
-            .get("data", [{}])[0]
-            .get("price", {})
-            .get("id")
-        )
+        user_obj.stripe_price_id = _subscription_price_id(subscription)
         current_period_end = subscription.get("current_period_end")
         trial_end = subscription.get("trial_end")
         user_obj.stripe_current_period_end = (
@@ -152,17 +175,30 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         user_obj.is_premium = subscription.get("status") in {"active", "trialing"}
         db.add(user_obj)
         db.commit()
+        db.refresh(user_obj)
+        return user_obj
+
+    def send_signature_welcome_once(user_obj: User | None, subscription: dict, metadata: dict | None = None) -> None:
+        if not user_obj or user_obj.signature_welcome_email_sent_at:
+            return
+        if not _is_signature_subscription(subscription, metadata):
+            return
+        if send_signature_welcome_email(user_obj.email, user_obj.username):
+            user_obj.signature_welcome_email_sent_at = datetime.now(timezone.utc)
+            db.add(user_obj)
+            db.commit()
 
     if event_type == "checkout.session.completed":
         subscription_id = data.get("subscription")
         customer_id = data.get("customer")
         payment_status = data.get("payment_status")
-        plan = (data.get("metadata") or {}).get("plan")
+        metadata = data.get("metadata") or {}
+        plan = metadata.get("plan")
         if subscription_id and customer_id:
             subscription = stripe.Subscription.retrieve(subscription_id)
-            update_user_from_subscription(subscription)
-            if payment_status == "paid":
-                user_obj = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            user_obj = update_user_from_subscription(subscription)
+            if payment_status == "paid" and _paid_amount_cents(data) > 0:
+                send_signature_welcome_once(user_obj, subscription, metadata)
                 if user_obj:
                     to_email = settings.SUBSCRIPTION_ALERT_EMAIL or "blharper95@gmail.com"
                     send_subscription_alert_email(to_email, user_obj.email, user_obj.username, plan)
@@ -172,6 +208,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         subscription_id = data.get("subscription")
         if subscription_id:
             subscription = stripe.Subscription.retrieve(subscription_id)
-            update_user_from_subscription(subscription)
+            user_obj = update_user_from_subscription(subscription)
+            if (
+                event_type == "invoice.paid"
+                and data.get("billing_reason") == "subscription_create"
+                and _paid_amount_cents(data) > 0
+            ):
+                send_signature_welcome_once(user_obj, subscription, data.get("metadata") or {})
 
     return {"status": "ok"}

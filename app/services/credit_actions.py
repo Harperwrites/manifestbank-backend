@@ -61,6 +61,17 @@ ACTION_LIBRARY.append(
     )
 )
 
+ACTION_LIBRARY.append(
+    _action(
+        title="Missed Daily Login",
+        description="A missed login day reduced identity continuity.",
+        primary_bureau="IAB",
+        action_type="missed_daily_login",
+        action_route="/dashboard",
+        confirmation_copy="Recorded.",
+    )
+)
+
 # IAB actions (40) – anchored to in-app actions
 ACTION_LIBRARY += _repeat_variants(
     "Create a Journal Entry",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, UTC
+from html import escape
 import logging
 import httpx
 
@@ -9,6 +10,79 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 _primary_daily_date = None
 _primary_daily_count = 0
+
+
+def _stamp() -> str:
+    return datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')
+
+
+def _button(url: str, label: str) -> str:
+    return f"""
+    <a
+      href="{escape(url, quote=True)}"
+      style="display:inline-block;padding:12px 20px;border-radius:999px;text-decoration:none;background:linear-gradient(135deg, #c88a77, #b67967);color:#ffffff;font-weight:700;letter-spacing:0.01em;"
+    >
+      {escape(label)}
+    </a>
+    """
+
+
+def _info_card(content: str) -> str:
+    return f"""
+    <div style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#f7f1eb;border:1px solid rgba(182,121,103,0.18);">
+      {content}
+    </div>
+    """
+
+
+def _email_shell(
+    *,
+    eyebrow: str,
+    heading: str,
+    body_html: str,
+    cta_html: str | None = None,
+    utility_html: str | None = None,
+    footer_note: str | None = None,
+) -> str:
+    footer = footer_note or "ManifestBank™ is a digital reflection and wealth visualization platform. It is not a financial institution."
+    return f"""
+    <div style="margin:0;padding:32px 16px;background:#1a1411;background-image:radial-gradient(circle at top, rgba(182,121,103,0.18), transparent 42%);">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
+              <tr>
+                <td align="center" style="padding:0 0 18px;">
+                  <img
+                    src="https://manifestbank.app/manifestbank-app-logo-latest.png"
+                    alt="ManifestBank™"
+                    width="118"
+                    height="118"
+                    style="display:block;border:0;outline:none;text-decoration:none;width:118px;height:118px;"
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td
+                  style="padding:34px 32px;border-radius:28px;background:#fbf8f3;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border:1px solid rgba(182,121,103,0.22);box-shadow:0 24px 54px rgba(8,6,6,0.28);font-family:'Helvetica Neue',Arial,sans-serif;color:#2b2320;"
+                >
+                  <div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8a6557;margin:0 0 14px;">{escape(eyebrow)}</div>
+                  <div style="font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.08;color:#2d211c;margin:0 0 16px;">{escape(heading)}</div>
+                  <div style="font-size:16px;line-height:1.72;color:#4a3a32;">{body_html}</div>
+                  {f'<div style="margin:24px 0 0;">{cta_html}</div>' if cta_html else ''}
+                  {utility_html or ''}
+                  <div style="margin-top:26px;padding-top:18px;border-top:1px solid rgba(138,101,87,0.18);font-size:12px;line-height:1.6;color:#7a675d;">
+                    <div>{escape(footer)}</div>
+                    <div style="margin-top:8px;">Sent {_stamp()}</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+    """
 
 
 def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
@@ -88,22 +162,22 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
 def send_verification_email(to_email: str, token: str) -> bool:
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     verify_url = f"{base}/verify-email?token={token}"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">Verify your ManifestBank email</h2>
-      <p style="margin: 0 0 12px;">Confirm your email to unlock full access to ManifestBank.</p>
-      <p style="margin: 0 0 18px;">
-        <a href="{verify_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
-          Verify email
-        </a>
-      </p>
-      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
-      <p style="font-size:12px;word-break:break-all;">{verify_url}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
+    utility_html = f"""
+    <div style="margin-top:18px;font-size:12px;line-height:1.6;color:#7a675d;">
+      <div>If the button does not work, paste this link into your browser:</div>
+      <div style="margin-top:6px;word-break:break-all;color:#6f4a3a;">{escape(verify_url)}</div>
     </div>
     """
+    html = _email_shell(
+        eyebrow="Email Verification",
+        heading="Verify your ManifestBank email",
+        body_html="""
+        <p style="margin:0 0 12px;">Confirm your email to unlock full access to ManifestBank™ and secure your account.</p>
+        <p style="margin:0;">Once verified, you can continue into the platform with the full experience available to your membership.</p>
+        """,
+        cta_html=_button(verify_url, "Verify email"),
+        utility_html=utility_html,
+    )
 
     return _send_email(to_email, "Verify your ManifestBank email", html)
 
@@ -111,56 +185,59 @@ def send_verification_email(to_email: str, token: str) -> bool:
 def send_password_reset_email(to_email: str, token: str) -> bool:
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     reset_url = f"{base}/reset-password?token={token}"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">Reset your ManifestBank password</h2>
-      <p style="margin: 0 0 12px;">Use the button below to reset your password.</p>
-      <p style="margin: 0 0 18px;">
-        <a href="{reset_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
-          Reset password
-        </a>
-      </p>
-      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
-      <p style="font-size:12px;word-break:break-all;">{reset_url}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
+    utility_html = f"""
+    <div style="margin-top:18px;font-size:12px;line-height:1.6;color:#7a675d;">
+      <div>If the button does not work, paste this link into your browser:</div>
+      <div style="margin-top:6px;word-break:break-all;color:#6f4a3a;">{escape(reset_url)}</div>
     </div>
     """
+    html = _email_shell(
+        eyebrow="Security",
+        heading="Reset your ManifestBank password",
+        body_html="""
+        <p style="margin:0 0 12px;">Use the button below to reset your password and return to your account.</p>
+        <p style="margin:0;">If you did not request this reset, you can ignore this email and no changes will be made.</p>
+        """,
+        cta_html=_button(reset_url, "Reset password"),
+        utility_html=utility_html,
+    )
 
     return _send_email(to_email, "Reset your ManifestBank password", html)
 
 
 def send_signup_alert_email(to_email: str, user_email: str, username: str | None) -> bool:
     display = username or user_email.split("@")[0]
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">New ManifestBank signup</h2>
-      <p style="margin: 0 0 6px;"><strong>Email:</strong> {user_email}</p>
-      <p style="margin: 0 0 6px;"><strong>Username:</strong> {display}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
-    </div>
-    """
+    html = _email_shell(
+        eyebrow="Admin Alert",
+        heading="New ManifestBank signup",
+        body_html=_info_card(
+            f"""
+            <div style="margin:0 0 8px;"><strong>Email:</strong> {escape(user_email)}</div>
+            <div><strong>Username:</strong> {escape(display)}</div>
+            """
+        ),
+    )
 
     return _send_email(to_email, "New ManifestBank signup", html)
 
 
 def send_contact_email(to_email: str, name: str, email: str, subject: str, message: str) -> bool:
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">New ManifestBank contact request</h2>
-      <p style="margin: 0 0 6px;"><strong>Name:</strong> {name}</p>
-      <p style="margin: 0 0 6px;"><strong>Email:</strong> {email}</p>
-      <p style="margin: 0 0 6px;"><strong>Subject:</strong> {subject}</p>
-      <p style="margin: 12px 0 6px;"><strong>Message:</strong></p>
-      <p style="margin: 0 0 6px; white-space: pre-line;">{message}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
-    </div>
-    """
+    html = _email_shell(
+        eyebrow="Contact",
+        heading="New ManifestBank contact request",
+        body_html="""
+        <p style="margin:0 0 14px;">A new contact request was submitted through the public site.</p>
+        """
+        + _info_card(
+            f"""
+            <div style="margin:0 0 8px;"><strong>Name:</strong> {escape(name)}</div>
+            <div style="margin:0 0 8px;"><strong>Email:</strong> {escape(email)}</div>
+            <div style="margin:0 0 8px;"><strong>Subject:</strong> {escape(subject)}</div>
+            <div style="margin:14px 0 6px;"><strong>Message:</strong></div>
+            <div style="white-space:pre-line;">{escape(message)}</div>
+            """
+        ),
+    )
 
     return _send_email(to_email, f"ManifestBank Contact: {subject}", html, reply_to=email)
 
@@ -168,40 +245,36 @@ def send_contact_email(to_email: str, name: str, email: str, subject: str, messa
 def send_subscription_alert_email(to_email: str, user_email: str, username: str | None, plan: str | None) -> bool:
     display = username or user_email.split("@")[0]
     plan_label = (plan or "annual").strip() or "annual"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">New ManifestBank™ Signature Member</h2>
-      <p style="margin: 0 0 6px;"><strong>Email:</strong> {user_email}</p>
-      <p style="margin: 0 0 6px;"><strong>Username:</strong> {display}</p>
-      <p style="margin: 0 0 6px;"><strong>Plan:</strong> {plan_label.title()}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
-    </div>
-    """
+    html = _email_shell(
+        eyebrow="Membership Alert",
+        heading="New ManifestBank™ Signature Member",
+        body_html=_info_card(
+            f"""
+            <div style="margin:0 0 8px;"><strong>Email:</strong> {escape(user_email)}</div>
+            <div style="margin:0 0 8px;"><strong>Username:</strong> {escape(display)}</div>
+            <div><strong>Plan:</strong> {escape(plan_label.title())}</div>
+            """
+        ),
+    )
 
     return _send_email(to_email, "New ManifestBank™ Signature Member", html)
 
 
 def send_trial_grant_email(to_email: str, username: str | None, trial_days: int) -> bool:
     display = username or to_email.split("@")[0]
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <p style="margin: 0 0 12px;">Thank you for being a part of the ManifestBank™ community. Truly. This space exists because of you.</p>
-      <p style="margin: 0 0 12px;">We’re excited to let you know that ManifestBank™ now offers subscriptions, and as a thank-you for being an early supporter, we’ve activated something special for you.</p>
-      <p style="margin: 0 0 12px;">✨ You’ve been granted a complimentary {trial_days}-day free trial of the ManifestBank™ Signature Membership.<br/>No card required. No action needed.</p>
-      <p style="margin: 0 0 12px;">Your trial starts immediately, giving you full access to Signature features designed to deepen your intention practice, clarity, and alignment with abundance as a system, not a wish.</p>
-      <p style="margin: 0 0 12px;">This is our way of saying thank you for building with us from the beginning.</p>
-      <p style="margin: 0 0 12px;">When your {trial_days} days are complete, you’ll have the option to continue if it feels aligned. Until then, enjoy the full Signature experience on us.</p>
-      <p style="margin: 18px 0 0;">With appreciation and momentum,<br/>The ManifestBank™ Team</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        ManifestBank™ is a mindset and visualization platform. It is not a financial institution.
-      </p>
-      <p style="font-size:12px;opacity:0.7;margin-top:12px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')} • {display}
-      </p>
-    </div>
+    body_html = f"""
+    <p style="margin:0 0 12px;">Thank you for being part of the ManifestBank™ community. This space exists because of early members like you who chose to build with intention.</p>
+    <p style="margin:0 0 12px;">We’ve activated a complimentary <strong>{trial_days}-day free trial</strong> of ManifestBank™ Signature for your account.</p>
+    {_info_card(f"<div><strong>No card required.</strong> No action needed. Your trial starts immediately.</div>")}
+    <p style="margin:0 0 12px;">You now have full access to the Signature experience while you explore the platform more deeply.</p>
+    <p style="margin:0;">With appreciation and momentum,<br/>The ManifestBank™ Team</p>
     """
+    html = _email_shell(
+        eyebrow="Signature Access",
+        heading="Your Signature trial is live",
+        body_html=body_html,
+        footer_note=f"ManifestBank™ is a mindset and visualization platform. It is not a financial institution. Recipient: {display}",
+    )
 
     return _send_email(to_email, f"ManifestBank™ Signature — {trial_days} days on us", html)
 
@@ -214,23 +287,22 @@ def send_myline_message_email(
 ) -> bool:
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     thread_url = f"{base}/myline/{thread_id}"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">New My Line message</h2>
-      <p style="margin: 0 0 12px;"><strong>{sender_name}</strong> sent you a new message.</p>
-      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">{preview}</p>
-      <p style="margin: 0 0 18px;">
-        <a href="{thread_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
-          Open My Line
-        </a>
-      </p>
-      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
-      <p style="font-size:12px;word-break:break-all;">{thread_url}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
+    utility_html = f"""
+    <div style="margin-top:18px;font-size:12px;line-height:1.6;color:#7a675d;">
+      <div>If the button does not work, paste this link into your browser:</div>
+      <div style="margin-top:6px;word-break:break-all;color:#6f4a3a;">{escape(thread_url)}</div>
     </div>
     """
+    html = _email_shell(
+        eyebrow="My Line",
+        heading="New My Line message",
+        body_html=f"""
+        <p style="margin:0 0 12px;"><strong>{escape(sender_name)}</strong> sent you a new message.</p>
+        {_info_card(escape(preview))}
+        """,
+        cta_html=_button(thread_url, "Open My Line"),
+        utility_html=utility_html,
+    )
     return _send_email(to_email, "ManifestBank™ — New My Line message", html)
 
 
@@ -243,23 +315,22 @@ def send_post_comment_email(
 ) -> bool:
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     post_url = f"{base}/ether?post_id={post_id}&comment_id={comment_id}"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">New comment on your post</h2>
-      <p style="margin: 0 0 12px;"><strong>{commenter_name}</strong> commented on your post.</p>
-      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">{preview}</p>
-      <p style="margin: 0 0 18px;">
-        <a href="{post_url}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
-          View comment
-        </a>
-      </p>
-      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
-      <p style="font-size:12px;word-break:break-all;">{post_url}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
+    utility_html = f"""
+    <div style="margin-top:18px;font-size:12px;line-height:1.6;color:#7a675d;">
+      <div>If the button does not work, paste this link into your browser:</div>
+      <div style="margin-top:6px;word-break:break-all;color:#6f4a3a;">{escape(post_url)}</div>
     </div>
     """
+    html = _email_shell(
+        eyebrow="The Ether™",
+        heading="New comment on your post",
+        body_html=f"""
+        <p style="margin:0 0 12px;"><strong>{escape(commenter_name)}</strong> commented on your post.</p>
+        {_info_card(escape(preview))}
+        """,
+        cta_html=_button(post_url, "View comment"),
+        utility_html=utility_html,
+    )
     return _send_email(to_email, "ManifestBank™ — New comment", html)
 
 
@@ -274,25 +345,22 @@ def send_ledger_post_email(
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     link = f"{base}{link_path}"
     verb = "credited" if direction == "credit" else "debited"
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <h2 style="margin: 0 0 10px;">Account update</h2>
-      <p style="margin: 0 0 12px;">A {entry_type} was {verb} to <strong>{account_name}</strong>.</p>
-      <p style="margin: 0 0 16px; padding: 10px 12px; background: #f7f2ef; border-radius: 12px;">
-        Amount: <strong>{amount}</strong>
-      </p>
-      <p style="margin: 0 0 18px;">
-        <a href="{link}" style="display:inline-block;padding:10px 16px;border-radius:999px;text-decoration:none;background:#b67967;color:white;font-weight:600;">
-          View details
-        </a>
-      </p>
-      <p style="font-size:12px;opacity:0.7;">If the button doesn't work, paste this link into your browser:</p>
-      <p style="font-size:12px;word-break:break-all;">{link}</p>
-      <p style="font-size:12px;opacity:0.7;margin-top:18px;">
-        Sent {datetime.now(UTC).strftime('%b %d, %Y %I:%M %p UTC')}
-      </p>
+    utility_html = f"""
+    <div style="margin-top:18px;font-size:12px;line-height:1.6;color:#7a675d;">
+      <div>If the button does not work, paste this link into your browser:</div>
+      <div style="margin-top:6px;word-break:break-all;color:#6f4a3a;">{escape(link)}</div>
     </div>
     """
+    html = _email_shell(
+        eyebrow="Account Update",
+        heading="Your account was updated",
+        body_html=f"""
+        <p style="margin:0 0 12px;">A {escape(entry_type)} was {escape(verb)} to <strong>{escape(account_name)}</strong>.</p>
+        {_info_card(f"Amount: <strong>{escape(amount)}</strong>")}
+        """,
+        cta_html=_button(link, "View details"),
+        utility_html=utility_html,
+    )
     return _send_email(to_email, "ManifestBank™ — Account update", html)
 
 
@@ -300,18 +368,17 @@ def send_signature_account_fix_email(
     to_email: str,
     contact_line_html: str,
 ) -> bool:
-    html = f"""
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #2b2320;">
-      <p style="margin: 0 0 12px;">Dear ManifestBank™ Signature Member,</p>
-      <p style="margin: 0 0 12px;">Thank you for being a valued part of the ManifestBank™ community.</p>
-      <p style="margin: 0 0 12px;">We recently identified an issue that affected the creation of multiple accounts within some user dashboards. We sincerely apologize for any confusion or inconvenience this may have caused.</p>
-      <p style="margin: 0 0 12px;"><strong>The issue has now been fully resolved.</strong></p>
-      <p style="margin: 0 0 12px;">As a <strong>ManifestBank™ Signature Member</strong>, you can create <strong>unlimited accounts</strong> within your ManifestBank™ dashboard to organize your intentions, financial visualizations, and personal goals exactly the way you choose.</p>
-      <p style="margin: 0 0 12px;">Your continued support means a great deal to us, and we’re grateful to have you building this experience alongside us. ManifestBank™ is growing every day because of members like you who believe in the vision and actively use the platform.</p>
-      <p style="margin: 0 0 12px;">{contact_line_html}</p>
-      <p style="margin: 0 0 12px;">Thank you again for being part of ManifestBank™ and for being a Signature Member.</p>
-      <p style="margin: 18px 0 0;">Warm regards,<br/>The ManifestBank™ Team</p>
-    </div>
-    """
+    html = _email_shell(
+        eyebrow="Platform Update",
+        heading="Issue resolved for Signature Members",
+        body_html=f"""
+        <p style="margin:0 0 12px;">Thank you for being a valued part of the ManifestBank™ community.</p>
+        <p style="margin:0 0 12px;">We recently identified an issue affecting the creation of multiple accounts in some dashboards. That issue has now been fully resolved.</p>
+        {_info_card("As a <strong>ManifestBank™ Signature Member</strong>, you can create <strong>unlimited accounts</strong> within your dashboard.")}
+        <p style="margin:0 0 12px;">Your continued support means a great deal to us, and we are grateful to have you building this experience alongside us.</p>
+        <p style="margin:0 0 12px;">{contact_line_html}</p>
+        <p style="margin:0;">Warm regards,<br/>The ManifestBank™ Team</p>
+        """,
+    )
     subject = "ManifestBank™ Update — Issue Resolved & Thank You for Your Support"
     return _send_email(to_email, subject, html)

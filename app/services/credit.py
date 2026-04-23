@@ -30,6 +30,8 @@ def daily_cap(premium: bool) -> int:
 def points_for_action_type(action_type: str | None, premium: bool) -> int:
     if action_type == "daily_login":
         return 2 if premium else 1
+    if action_type == "missed_daily_login":
+        return -2
     return 1
 
 
@@ -42,7 +44,7 @@ def _today_points(db: Session, user_id: int, premium: bool) -> int:
         .filter(CreditActionCompletion.user_id == user_id, CreditActionCompletion.completed_at >= start_day)
         .all()
     )
-    return sum(points_for_action_type(action.action_type, premium) for _, action in today_rows)
+    return sum(max(points_for_action_type(action.action_type, premium), 0) for _, action in today_rows)
 
 
 def _complete_action_record(db: Session, user_id: int, action: CreditAction) -> bool:
@@ -162,6 +164,84 @@ def record_daily_login(db: Session, user_id: int) -> bool:
     return True
 
 
+def apply_missed_daily_login_penalties(db: Session, user_id: int) -> int:
+    now = datetime.now(UTC)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    yesterday = today_start.date() - timedelta(days=1)
+
+    daily_login_action = (
+        db.query(CreditAction)
+        .filter(CreditAction.action_type == "daily_login", CreditAction.active.is_(True))
+        .first()
+    )
+    penalty_action = (
+        db.query(CreditAction)
+        .filter(CreditAction.action_type == "missed_daily_login", CreditAction.active.is_(True))
+        .first()
+    )
+    if not daily_login_action or not penalty_action:
+        return 0
+
+    last_login = (
+        db.query(CreditActionCompletion)
+        .filter(
+            CreditActionCompletion.user_id == user_id,
+            CreditActionCompletion.action_id == daily_login_action.id,
+        )
+        .order_by(CreditActionCompletion.completed_at.desc())
+        .first()
+    )
+    if not last_login:
+        return 0
+
+    last_penalty = (
+        db.query(CreditActionCompletion)
+        .filter(
+            CreditActionCompletion.user_id == user_id,
+            CreditActionCompletion.action_id == penalty_action.id,
+        )
+        .order_by(CreditActionCompletion.completed_at.desc())
+        .first()
+    )
+
+    processed_through = last_login.completed_at.date()
+    if last_penalty and last_penalty.completed_at.date() > processed_through:
+        processed_through = last_penalty.completed_at.date()
+
+    if processed_through >= yesterday:
+        return 0
+
+    created = 0
+    cursor = processed_through + timedelta(days=1)
+    while cursor <= yesterday:
+        day_start = datetime(cursor.year, cursor.month, cursor.day, tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        exists = (
+            db.query(CreditActionCompletion)
+            .filter(
+                CreditActionCompletion.user_id == user_id,
+                CreditActionCompletion.action_id == penalty_action.id,
+                CreditActionCompletion.completed_at >= day_start,
+                CreditActionCompletion.completed_at < day_end,
+            )
+            .first()
+        )
+        if not exists:
+            db.add(
+                CreditActionCompletion(
+                    user_id=user_id,
+                    action_id=penalty_action.id,
+                    completed_at=day_start + timedelta(hours=12),
+                )
+            )
+            created += 1
+        cursor += timedelta(days=1)
+
+    if created:
+        db.commit()
+    return created
+
+
 def complete_credit_action_by_id(db: Session, user_id: int, action_id: int) -> tuple[CreditAction | None, bool]:
     action = db.query(CreditAction).filter(CreditAction.id == action_id, CreditAction.active.is_(True)).first()
     if not action:
@@ -196,6 +276,7 @@ def _pick_driver(positive: list[str], negative: list[str], count_7d: int) -> str
 
 
 def get_credit_summary(db: Session, user_id: int, days: int) -> dict:
+    apply_missed_daily_login_penalties(db, user_id)
     now = datetime.now(UTC)
     start_7d = now - timedelta(days=7)
     start_30d = now - timedelta(days=30)
@@ -216,7 +297,7 @@ def get_credit_summary(db: Session, user_id: int, days: int) -> dict:
         .filter(CreditActionCompletion.user_id == user_id, CreditActionCompletion.completed_at >= start_day)
         .all()
     )
-    daily_used = sum(points_for_action_type(action.action_type, premium) for _, action in today_rows)
+    daily_used = sum(max(points_for_action_type(action.action_type, premium), 0) for _, action in today_rows)
 
     def count_by_bureau(bureau: str, since: datetime) -> int:
         rows = base_query.filter(
@@ -312,6 +393,7 @@ def get_credit_summary(db: Session, user_id: int, days: int) -> dict:
 
 
 def get_bureau_detail(db: Session, user_id: int, bureau: str, days: int) -> dict:
+    apply_missed_daily_login_penalties(db, user_id)
     now = datetime.now(UTC)
     start_7d = now - timedelta(days=days)
     user = db.query(User).filter(User.id == user_id).first()

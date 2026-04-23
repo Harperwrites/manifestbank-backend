@@ -21,6 +21,9 @@ alembic/__pycache__/
 
 # ---- Logs ----
 *.log
+test-results/
+uploads/
+tmp/
 
 # ---- VS Code ----
 .vscode/

@@ -1,6 +1,7 @@
 import pytest
+from datetime import UTC, datetime, timedelta
 
-from app.models.credit import CreditAction, CreditTodo
+from app.models.credit import CreditAction, CreditActionCompletion, CreditTodo
 
 
 @pytest.mark.asyncio
@@ -172,3 +173,45 @@ async def test_credit_daily_login_endpoint_is_idempotent_and_reports_points(clie
 
     assert free_daily.status_code == 200
     assert free_daily.json() == {"awarded": False, "points": 0}
+
+
+@pytest.mark.asyncio
+async def test_missed_login_days_deduct_iab_and_composite_score(client, auth_helper, db):
+    login = await auth_helper(client, "creditgap@test.com", "pass", "creditgap", premium=False, verified=True)
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    daily_login_action = db.query(CreditAction).filter(CreditAction.action_type == "daily_login").first()
+    assert daily_login_action is not None
+
+    first_login_completion = (
+        db.query(CreditActionCompletion)
+        .filter(
+            CreditActionCompletion.user_id.is_not(None),
+            CreditActionCompletion.action_id == daily_login_action.id,
+        )
+        .order_by(CreditActionCompletion.completed_at.desc())
+        .first()
+    )
+    assert first_login_completion is not None
+    first_login_completion.completed_at = datetime.now(UTC) - timedelta(days=3)
+    db.add(first_login_completion)
+    db.commit()
+
+    second_login = await client.post("/auth/login", json={"email": "creditgap@test.com", "password": "pass"})
+    assert second_login.status_code == 200
+    assert second_login.json()["login_credit_awarded"] is True
+
+    summary = await client.get("/credit/summary?days=30", headers=headers)
+    report = await client.get("/credit/report", headers=headers)
+
+    assert summary.status_code == 200
+    assert report.status_code == 200
+
+    summary_body = summary.json()
+    assert summary_body["scores"]["iab"] == 698
+    assert summary_body["scores"]["composite"] == 699
+
+    missed_logins = [item for item in report.json()["items"] if item["action_type"] == "missed_daily_login"]
+    assert len(missed_logins) == 2
+    assert all(item["points"] == -2 for item in missed_logins)

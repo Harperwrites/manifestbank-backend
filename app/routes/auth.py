@@ -39,8 +39,16 @@ from app.models.account import Account
 from app.models.ether import Profile, EtherSyncRequest
 from app.models.user import User
 try:
-    from app.services.credit import ensure_credit_actions, record_daily_login, points_for_action_type
+    from app.services.credit import (
+        apply_missed_daily_login_penalties,
+        ensure_credit_actions,
+        record_daily_login,
+        points_for_action_type,
+    )
 except Exception:
+    def apply_missed_daily_login_penalties(db, user_id: int):  # type: ignore[no-redef]
+        return 0
+
     def ensure_credit_actions(db):  # type: ignore[no-redef]
         return None
 
@@ -313,6 +321,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
             db.commit()
 
     ensure_credit_actions(db)
+    apply_missed_daily_login_penalties(db, db_user.id)
     login_credit_awarded = record_daily_login(db, db_user.id)
     login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
 
@@ -366,6 +375,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     ensure_credit_actions(db)
+    apply_missed_daily_login_penalties(db, db_user.id)
     login_credit_awarded = record_daily_login(db, db_user.id)
     login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
 

@@ -16,6 +16,7 @@ from app.schemas.credit import (
     CreditReportItem,
 )
 from app.services.credit import (
+    apply_missed_daily_login_penalties,
     complete_credit_action_by_id,
     ensure_credit_actions,
     get_credit_summary,
@@ -46,7 +47,11 @@ def credit_actions(
     current_user=Depends(get_current_user),
 ):
     ensure_credit_actions(db)
-    query = db.query(CreditAction).filter(CreditAction.active.is_(True))
+    apply_missed_daily_login_penalties(db, current_user.id)
+    query = db.query(CreditAction).filter(
+        CreditAction.active.is_(True),
+        CreditAction.action_type.notin_(["daily_login", "missed_daily_login"]),
+    )
     if bureau:
         query = query.filter(CreditAction.primary_bureau == bureau)
     actions = query.order_by(func.random()).limit(6).all()
@@ -76,6 +81,7 @@ def bureau_detail(
     current_user=Depends(get_current_user),
 ):
     ensure_credit_actions(db)
+    apply_missed_daily_login_penalties(db, current_user.id)
     normalized = bureau.strip().lower()
     mapping = {
         "iab": "IAB",
@@ -189,6 +195,7 @@ def delete_todo_by_action(action_id: int, db: Session = Depends(get_db), current
 @router.get("/report", response_model=CreditReport)
 def credit_report(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     ensure_credit_actions(db)
+    apply_missed_daily_login_penalties(db, current_user.id)
     premium = is_premium(current_user)
     rows = (
         db.query(CreditActionCompletion, CreditAction)
@@ -215,6 +222,7 @@ def credit_report(db: Session = Depends(get_db), current_user=Depends(get_curren
 @router.post("/daily-login")
 def credit_daily_login(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     ensure_credit_actions(db)
+    apply_missed_daily_login_penalties(db, current_user.id)
     awarded = record_daily_login(db, current_user.id)
     points = points_for_action_type("daily_login", is_premium(current_user)) if awarded else 0
     return {"awarded": awarded, "points": points}

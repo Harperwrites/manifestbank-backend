@@ -95,8 +95,9 @@ def test_branded_email_templates_render_shared_shell(monkeypatch, fn_name, kwarg
     assert '<meta name="color-scheme" content="light only" />' in html
     assert "ManifestBank™ is a" in html
     assert "ManifestBankâ" not in html
-    assert "color:#241814 !important" in html
-    assert "-webkit-text-fill-color:#241814" in html
+    assert "background:#fffaf5;color:#261b16" in html
+    assert "color:#241814" in html
+    assert "height:54px" in html
     assert "background-image:url('https://manifestbank.app/marble-veins.png')" in html
     for fragment in expected_fragments:
         assert fragment in html

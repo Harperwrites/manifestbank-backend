@@ -46,42 +46,53 @@ def _email_shell(
 ) -> str:
     footer = footer_note or "ManifestBank™ is a digital reflection and wealth visualization platform. It is not a financial institution."
     return f"""
-    <div style="margin:0;padding:32px 16px;background:#1a1411;background-image:radial-gradient(circle at top, rgba(182,121,103,0.18), transparent 42%);">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-        <tr>
-          <td align="center">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
-              <tr>
-                <td align="center" style="padding:0 0 18px;">
-                  <img
-                    src="https://manifestbank.app/manifestbank-app-logo-latest.png"
-                    alt="ManifestBank™"
-                    width="118"
-                    height="118"
-                    style="display:block;border:0;outline:none;text-decoration:none;width:118px;height:118px;"
-                  />
-                </td>
-              </tr>
-              <tr>
-                <td
-                  style="padding:34px 32px;border-radius:28px;background:#fbf8f3;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border:1px solid rgba(182,121,103,0.22);box-shadow:0 24px 54px rgba(8,6,6,0.28);font-family:'Helvetica Neue',Arial,sans-serif;color:#2b2320;"
-                >
-                  <div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8a6557;margin:0 0 14px;">{escape(eyebrow)}</div>
-                  <div style="font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.08;color:#2d211c;margin:0 0 16px;">{escape(heading)}</div>
-                  <div style="font-size:16px;line-height:1.72;color:#4a3a32;">{body_html}</div>
-                  {f'<div style="margin:24px 0 0;">{cta_html}</div>' if cta_html else ''}
-                  {utility_html or ''}
-                  <div style="margin-top:26px;padding-top:18px;border-top:1px solid rgba(138,101,87,0.18);font-size:12px;line-height:1.6;color:#7a675d;">
-                    <div>{escape(footer)}</div>
-                    <div style="margin-top:8px;">Sent {_stamp()}</div>
-                  </div>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </div>
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{escape(heading)}</title>
+      </head>
+      <body style="margin:0;padding:0;background:#1a1411;">
+        <div style="margin:0;padding:32px 16px;background:#1a1411;background-image:radial-gradient(circle at top, rgba(182,121,103,0.18), transparent 42%);">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
+                  <tr>
+                    <td align="center" style="padding:0 0 18px;">
+                      <img
+                        src="https://manifestbank.app/manifestbank-app-logo-latest.png"
+                        alt="ManifestBank™"
+                        width="118"
+                        height="118"
+                        style="display:block;border:0;outline:none;text-decoration:none;width:118px;height:118px;"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td
+                      style="padding:34px 32px;border-radius:28px;background:#fbf8f3;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border:1px solid rgba(182,121,103,0.22);box-shadow:0 24px 54px rgba(8,6,6,0.28);font-family:'Helvetica Neue',Arial,sans-serif;color:#2b2320;"
+                    >
+                      <div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8a6557;margin:0 0 14px;">{escape(eyebrow)}</div>
+                      <div style="font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.08;color:#2d211c;margin:0 0 16px;">{escape(heading)}</div>
+                      <div style="font-size:16px;line-height:1.72;color:#4a3a32;">{body_html}</div>
+                      {f'<div style="margin:24px 0 0;">{cta_html}</div>' if cta_html else ''}
+                      {utility_html or ''}
+                      <div style="margin-top:26px;padding-top:18px;border-top:1px solid rgba(138,101,87,0.18);font-size:12px;line-height:1.6;color:#7a675d;">
+                        <div>{escape(footer)}</div>
+                        <div style="margin-top:8px;">Sent {_stamp()}</div>
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </body>
+    </html>
     """
 
 

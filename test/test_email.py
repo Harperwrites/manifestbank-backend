@@ -78,7 +78,9 @@ def test_branded_email_templates_render_shared_shell(monkeypatch, fn_name, kwarg
     assert recorder.subject == expected_subject
     html = recorder.html
     assert html is not None
+    assert '<meta charset="utf-8" />' in html
     assert "ManifestBank™ is a" in html
+    assert "ManifestBankâ" not in html
     assert "background-image:url('https://manifestbank.app/marble-veins.png')" in html
     for fragment in expected_fragments:
         assert fragment in html

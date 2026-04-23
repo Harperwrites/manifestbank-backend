@@ -70,7 +70,7 @@ def _email_shell(
                   <tr>
                     <td align="center" style="padding:0 0 6px;">
                       <img
-                        src="https://manifestbank.app/manifestbank-app-logo-latest.png"
+                        src="https://manifestbank.app/manifestbank-app-logo-tight.png"
                         alt="ManifestBank™"
                         width="104"
                         height="104"

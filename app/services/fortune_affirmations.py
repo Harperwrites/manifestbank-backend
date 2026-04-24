@@ -731,4 +731,9 @@ def build_fortune_affirmations(
     if stronger and line_count < 4:
         line_count = 4
     lines = _select_lines(mode_bank_key, history=history, line_count=line_count, hint=f"{variant_hint}|{response_count}")
-    return "\n".join(f"- {line}" for line in lines)
+    bullets = "\n".join(f"- {line}" for line in lines)
+    if shorter:
+        return "\n".join(["Here’s a shorter daily set.", "", bullets])
+    if stronger:
+        return "\n".join(["Here’s a stronger version.", "", "Here are a few affirmations:", "", bullets])
+    return "\n".join(["Here are a few affirmations:", "", bullets])

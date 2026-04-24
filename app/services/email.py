@@ -45,6 +45,9 @@ def _email_shell(
     footer_note: str | None = None,
 ) -> str:
     footer = footer_note or "ManifestBank™ is a digital reflection and wealth visualization platform. It is not a financial institution."
+    base_url = settings.FRONTEND_BASE_URL.rstrip("/")
+    logo_url = f"{base_url}/manifestbank-glow-edge-logo.png"
+    logo_href = f"{base_url}/auth"
     return f"""
     <!doctype html>
     <html lang="en">
@@ -74,6 +77,17 @@ def _email_shell(
                     >
                       <div style="height:54px;background-color:#f5eee8;background-image:url('https://manifestbank.app/marble-veins.png');background-size:cover;background-position:center;border-radius:28px 28px 0 0;"></div>
                       <div style="padding:28px 32px 32px;background:#fffaf5;color:#261b16;">
+                        <div style="text-align:center;margin:-6px 0 18px;">
+                          <a href="{escape(logo_href, quote=True)}" style="display:inline-block;text-decoration:none;border:0;outline:none;">
+                            <img
+                              src="{escape(logo_url, quote=True)}"
+                              alt="ManifestBank™"
+                              width="126"
+                              height="126"
+                              style="display:inline-block;width:126px;height:126px;max-width:100%;border:0;outline:none;text-decoration:none;"
+                            />
+                          </a>
+                        </div>
                         <div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8b5147;margin:0 0 14px;">{escape(eyebrow)}</div>
                         <div style="font-family:Georgia,'Times New Roman',serif;font-size:32px;line-height:1.12;color:#241814;margin:0 0 16px;">{escape(heading)}</div>
                         <div style="font-size:16px;line-height:1.72;color:#261b16;">{body_html}</div>

@@ -94,7 +94,10 @@ def test_branded_email_templates_render_shared_shell(monkeypatch, fn_name, kwarg
     assert '<meta name="color-scheme" content="light only" />' in html
     assert "ManifestBank™ is a" in html
     assert "ManifestBankâ" not in html
-    assert "<img" not in html
+    assert '<img' in html
+    assert 'src="https://manifestbank.app/manifestbank-glow-edge-logo.png"' in html
+    assert 'alt="ManifestBank™"' in html
+    assert 'href="https://manifestbank.app/auth"' in html
     assert "background:#fffaf5;color:#261b16" in html
     assert "color:#241814" in html
     assert "height:54px" in html

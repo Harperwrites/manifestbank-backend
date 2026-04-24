@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -10,7 +11,11 @@ from app.services import email as email_service
 
 
 def main() -> None:
-    settings.FRONTEND_BASE_URL = "https://manifestbank.app"
+    settings.FRONTEND_BASE_URL = (
+        os.environ.get("MANIFESTBANK_PREVIEW_BASE_URL")
+        or settings.FRONTEND_BASE_URL
+        or "https://manifestbank.app"
+    )
     output_dir = Path("tmp/email-previews")
     output_dir.mkdir(parents=True, exist_ok=True)
     for stale_preview in output_dir.glob("*.html"):
@@ -87,6 +92,7 @@ def main() -> None:
     </html>
     """
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
+    print(f"Using FRONTEND_BASE_URL={settings.FRONTEND_BASE_URL}")
     print(f"Wrote {len(rendered)} previews to {output_dir.resolve()}/index.html")
 
 

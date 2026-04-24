@@ -4171,7 +4171,6 @@ def _sanitize_general_reply(text: str) -> str:
 
 def _sanitize_script_reply(text: str) -> str:
     cleaned = _strip_legacy_response_phrases(text)
-    cleaned = cleaned.replace("**Script**", "Script:").replace("**Shorter Script**", "Script:")
     cleaned = _split_inline_dash_bullets(cleaned)
     lines = [line.rstrip() for line in cleaned.splitlines()]
     kept: list[str] = []
@@ -4180,6 +4179,9 @@ def _sanitize_script_reply(text: str) -> str:
         if not stripped:
             if kept and kept[-1] != "":
                 kept.append("")
+            continue
+        if stripped in {"**Script**", "**Shorter Script**"}:
+            kept.append(stripped)
             continue
         if stripped.lower().startswith(("script:", "daily:", "weekly:", "adjustments:", "speak-aloud anchor:", "next step:")):
             kept.append(stripped)

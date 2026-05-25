@@ -30,6 +30,14 @@ def _price_for_plan(plan: str | None) -> str:
     raise HTTPException(status_code=400, detail="Invalid plan. Use 'monthly' or 'annual'.")
 
 
+def _promo_price_for_campaign(campaign: str | None, plan: str | None) -> str | None:
+    if campaign != "signature50" or plan != "annual":
+        return None
+    if not settings.STRIPE_SIGNATURE_PROMO_PRICE_ID:
+        raise HTTPException(status_code=500, detail="Stripe promo price not configured")
+    return settings.STRIPE_SIGNATURE_PROMO_PRICE_ID
+
+
 def _subscription_price_id(subscription: dict) -> str | None:
     return (
         subscription.get("items", {})
@@ -46,7 +54,11 @@ def _is_signature_subscription(subscription: dict | None, metadata: dict | None 
     if tier == "signature":
         return True
     price_id = _subscription_price_id(subscription or {})
-    signature_prices = {settings.STRIPE_PRICE_MONTHLY, settings.STRIPE_PRICE_ANNUAL}
+    signature_prices = {
+        settings.STRIPE_PRICE_MONTHLY,
+        settings.STRIPE_PRICE_ANNUAL,
+        settings.STRIPE_SIGNATURE_PROMO_PRICE_ID,
+    }
     return bool(price_id and price_id in signature_prices)
 
 
@@ -58,6 +70,16 @@ def _paid_amount_cents(data: dict) -> int:
     return 0
 
 
+def _welcome_username(user_obj: User | None, *metadata_sources: dict | None) -> str | None:
+    if user_obj and user_obj.username:
+        return user_obj.username
+    for metadata in metadata_sources:
+        username = (metadata or {}).get("username")
+        if isinstance(username, str) and username.strip():
+            return username.strip()
+    return None
+
+
 @router.post("/checkout-session")
 def create_checkout_session(
     payload: dict,
@@ -67,9 +89,10 @@ def create_checkout_session(
     _require_stripe_key()
 
     plan = payload.get("plan") if isinstance(payload, dict) else None
+    campaign = payload.get("campaign") if isinstance(payload, dict) else None
     price_id = payload.get("price_id") if isinstance(payload, dict) else None
     if not price_id:
-        price_id = _price_for_plan(plan)
+        price_id = _promo_price_for_campaign(campaign, plan) or _price_for_plan(plan)
 
     if not user.stripe_customer_id:
         display_name = user.username or user.email
@@ -183,7 +206,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             return
         if not _is_signature_subscription(subscription, metadata):
             return
-        if send_signature_welcome_email(user_obj.email, user_obj.username):
+        username = _welcome_username(user_obj, metadata, subscription.get("metadata"))
+        if send_signature_welcome_email(user_obj.email, username):
             user_obj.signature_welcome_email_sent_at = datetime.now(timezone.utc)
             db.add(user_obj)
             db.commit()

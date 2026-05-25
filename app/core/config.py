@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_PRICE_MONTHLY: str | None = None
     STRIPE_PRICE_ANNUAL: str | None = None
+    STRIPE_SIGNATURE_PROMO_PRICE_ID: str | None = None
     STRIPE_SUCCESS_URL: str | None = None
     STRIPE_CANCEL_URL: str | None = None
     STRIPE_PORTAL_RETURN_URL: str | None = None

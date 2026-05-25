@@ -7,7 +7,13 @@ from datetime import datetime, UTC
 from app.db.session import get_db
 from app.core.security import get_current_user, get_verified_user
 from app.schemas.ledger import LedgerEntryCreate, LedgerEntryRead, BalanceRead, TransferCreate
-from app.crud.crud_ledger import create_ledger_entry, list_ledger_entries, get_account_balance, create_transfer
+from app.crud.crud_ledger import (
+    create_ledger_entry,
+    list_ledger_entries,
+    get_account_balance,
+    get_latest_posted_balance_timestamp,
+    create_transfer,
+)
 from app.services.fx import convert_amount_with_rate
 from app.crud.crud_account import get_account
 from app.services.email import send_ledger_post_email
@@ -21,6 +27,7 @@ from app.services.tier import (
     FREE_EXPENSE_LIMIT_7D,
     FREE_CHECK_LIMIT_7D,
     TIER_NAME,
+    build_preview_access,
 )
 try:
     from app.services.credit import record_credit_action, ensure_credit_actions
@@ -36,6 +43,13 @@ router = APIRouter(tags=["ledger"])
 
 def is_admin(user) -> bool:
     return getattr(user, "role", None) == "admin"
+
+
+def _serialize_ledger_entry(entry, current_user) -> LedgerEntryRead:
+    preview = build_preview_access(user=current_user, created_at=entry.created_at)
+    payload = LedgerEntryRead.model_validate(entry).model_dump()
+    payload.update(preview)
+    return LedgerEntryRead(**payload)
 
 
 @router.get("/ledger/free-tier-status")
@@ -124,7 +138,8 @@ def get_ledger(
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
 
-    return list_ledger_entries(db, account_id, limit=limit, offset=offset)
+    entries = list_ledger_entries(db, account_id, limit=limit, offset=offset)
+    return [_serialize_ledger_entry(entry, current_user) for entry in entries]
 
 
 @router.get("/accounts/{account_id}/balance", response_model=BalanceRead)
@@ -142,7 +157,15 @@ def get_balance(
         raise HTTPException(status_code=403, detail="Not allowed")
 
     bal = get_account_balance(db, account_id, currency=currency)
-    return BalanceRead(account_id=account_id, currency=currency, balance=bal, as_of=datetime.now(UTC))
+    latest_posted_at = get_latest_posted_balance_timestamp(db, account_id)
+    preview = build_preview_access(user=current_user, created_at=latest_posted_at)
+    return BalanceRead(
+        account_id=account_id,
+        currency=currency,
+        balance=bal,
+        as_of=datetime.now(UTC),
+        **preview,
+    )
 
 
 @router.post("/transfers")

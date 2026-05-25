@@ -58,16 +58,7 @@ def list_ledger_entries(db: Session, account_id: int, limit: int = 50, offset: i
 
 
 def get_account_balance(db: Session, account_id: int, currency: str = "USD") -> Decimal:
-    account_ids = [account_id]
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if account and account.account_type == "trust":
-        child_ids = [
-            row.id
-            for row in db.query(Account.id)
-            .filter(Account.parent_account_id == account_id)
-            .all()
-        ]
-        account_ids.extend(child_ids)
+    account_ids = get_balance_account_ids(db, account_id)
 
     entries = (
         db.query(LedgerEntry)
@@ -83,6 +74,29 @@ def get_account_balance(db: Session, account_id: int, currency: str = "USD") -> 
         else:
             total -= converted
     return total
+
+
+def get_balance_account_ids(db: Session, account_id: int) -> list[int]:
+    account_ids = [account_id]
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if account and account.account_type == "trust":
+        child_ids = [
+            row.id
+            for row in db.query(Account.id)
+            .filter(Account.parent_account_id == account_id)
+            .all()
+        ]
+        account_ids.extend(child_ids)
+    return account_ids
+
+
+def get_latest_posted_balance_timestamp(db: Session, account_id: int) -> datetime | None:
+    account_ids = get_balance_account_ids(db, account_id)
+    return (
+        db.query(func.max(LedgerEntry.created_at))
+        .filter(LedgerEntry.account_id.in_(account_ids), LedgerEntry.status == "posted")
+        .scalar()
+    )
 
 
 def create_transfer(

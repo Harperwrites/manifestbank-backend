@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, UTC
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.config import settings
 from app.models.ledger import LedgerEntry
 from app.models.scheduled_entry import ScheduledEntry
 from app.models.affirmation import AffirmationEntry
@@ -12,6 +13,7 @@ from app.models.account import Account
 
 
 TIER_NAME = "ManifestBank™ Signature"
+BALANCE_PREVIEW_WINDOW = timedelta(hours=12)
 
 FREE_DEPOSIT_LIMIT_7D = 2
 FREE_EXPENSE_LIMIT_7D = 2
@@ -27,6 +29,64 @@ def is_premium(user) -> bool:
     if getattr(user, "role", None) == "admin":
         return True
     return bool(getattr(user, "is_premium", False))
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _rollout_at() -> datetime:
+    raw = settings.BALANCE_PREVIEW_ROLLOUT_AT
+    normalized = raw.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    return _as_utc(parsed) or datetime(2026, 5, 25, tzinfo=UTC)
+
+
+def preview_anchor_at(created_at: datetime | None) -> datetime | None:
+    created = _as_utc(created_at)
+    if created is None:
+        return None
+    return max(created, _rollout_at())
+
+
+def compute_preview_expires_at(created_at: datetime | None) -> datetime | None:
+    created = preview_anchor_at(created_at)
+    if not created:
+        return None
+    return created + BALANCE_PREVIEW_WINDOW
+
+
+def build_preview_access(
+    *,
+    user,
+    created_at: datetime | None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    current = _as_utc(now) or datetime.now(UTC)
+    anchor = preview_anchor_at(created_at)
+    expires_at = compute_preview_expires_at(created_at)
+    if is_premium(user):
+        return {
+            "preview_expires_at": expires_at,
+            "is_preview_expired": False,
+            "visible_to_user": True,
+        }
+    if not expires_at:
+        return {
+            "preview_expires_at": None,
+            "is_preview_expired": False,
+            "visible_to_user": True,
+        }
+    expired = anchor is not None and anchor <= current - BALANCE_PREVIEW_WINDOW
+    return {
+        "preview_expires_at": expires_at,
+        "is_preview_expired": expired,
+        "visible_to_user": not expired,
+    }
 
 
 def _since_7d() -> datetime:

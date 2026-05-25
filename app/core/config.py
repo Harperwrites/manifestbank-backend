@@ -179,6 +179,7 @@ class Settings(BaseSettings):
     TELLER_MAX_OUTPUT_TOKENS: int = 450
     TELLER_MAX_CHARS: int = 1200
     TELLER_PROMPT_MAX_CHARS: int = 1400
+    BALANCE_PREVIEW_ROLLOUT_AT: str = "2026-05-25T00:00:00Z"
 
     # ✅ Backwards-compatible alias for code expecting this name
     @property

@@ -50,6 +50,9 @@ class LedgerEntryRead(BaseModel):
     reversed_entry_id: Optional[int] = None
 
     created_at: datetime
+    preview_expires_at: datetime | None = None
+    is_preview_expired: bool = False
+    visible_to_user: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -59,6 +62,9 @@ class BalanceRead(BaseModel):
     currency: str = "USD"
     balance: Decimal
     as_of: datetime
+    preview_expires_at: datetime | None = None
+    is_preview_expired: bool = False
+    visible_to_user: bool = True
 
 
 class TransferCreate(BaseModel):

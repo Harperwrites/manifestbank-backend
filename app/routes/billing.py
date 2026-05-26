@@ -117,6 +117,7 @@ def create_checkout_session(
         mode="subscription",
         customer=user.stripe_customer_id,
         line_items=[{"price": price_id, "quantity": 1}],
+        allow_promotion_codes=campaign == "signature50",
         success_url=success_url,
         cancel_url=cancel_url,
         client_reference_id=str(user.id),

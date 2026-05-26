@@ -1,6 +1,8 @@
+from datetime import datetime
 import importlib
 
 import pytest
+import httpx
 
 from app.services import email as email_service
 
@@ -54,9 +56,54 @@ from app.services import email as email_service
             [
                 "Welcome to ManifestBank™ Signature",
                 "Signature Welcome",
+                "Welcome to <strong>ManifestBank™ Signature</strong>, Nova.",
                 "You didn’t just upgrade. You elevated.",
                 "Fortune is evolving in real time.",
                 "Enter Signature",
+                "/dashboard",
+            ],
+        ),
+        (
+            "send_signature_presence_email",
+            {"to_email": "member@test.com"},
+            "You’re Not Just Here… You’re Part of This 💫",
+            [
+                "You’re Not Just Here… You’re Part of This 💫",
+                "Signature Presence",
+                "We see you.",
+                "Your presence here means something.",
+                "More is unfolding.",
+                "Enter ManifestBank™",
+                "/dashboard",
+            ],
+        ),
+        (
+            "send_signature_recognition_email",
+            {"to_email": "member@test.com"},
+            "A Personal Thank You — And Something We Owe You",
+            [
+                "A Personal Thank You",
+                "Signature Recognition",
+                "We’re genuinely sorry for that delay.",
+                "ManifestBank™ is catching up to you.",
+                "Enter ManifestBank™",
+                "/dashboard",
+            ],
+        ),
+        (
+            "send_signature_promo_email",
+            {"to_email": "member@test.com"},
+            "50% Off Signature Annual Membership Ends June 1 at Midnight CST",
+            [
+                "50% Off Signature Annual Membership Ends June 1 at Midnight CST",
+                "Signature Offer",
+                "Dear ManifestBank™ Members,",
+                "Something special has arrived ✨",
+                "50% OFF",
+                "SIGNATURE50",
+                "$36/year",
+                "Balance Preview Vault™ 🗝️",
+                "Unlock ManifestBank™ Signature",
                 "/dashboard",
             ],
         ),
@@ -132,3 +179,95 @@ def test_contact_email_escapes_user_supplied_html(monkeypatch):
     assert "<img src=x" not in captured["html"]
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in captured["html"]
     assert "&lt;img src=x onerror=alert(1)&gt;" in captured["html"]
+
+
+def test_send_email_uses_legacy_fallback_account(monkeypatch):
+    email_module = importlib.reload(email_service)
+    email_module._account_daily_counters.clear()
+    monkeypatch.setattr(email_module.settings, "RESEND_API_KEY", "primary-key")
+    monkeypatch.setattr(email_module.settings, "RESEND_FROM_EMAIL", "primary@manifestbank.app")
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_API_KEY", "fallback-key")
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_FROM_EMAIL", "backup@manifestbank.app")
+
+    calls = []
+
+    def fake_post(url: str, headers: dict, json: dict, timeout: int):
+        calls.append({"headers": headers, "json": json})
+        if len(calls) == 1:
+            request = httpx.Request("POST", url)
+            response = httpx.Response(503, request=request)
+            raise httpx.HTTPStatusError("primary failed", request=request, response=response)
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(email_module.httpx, "post", fake_post)
+
+    assert email_module._send_email("member@test.com", "Subject", "<p>Hello</p>") is True
+    assert len(calls) == 2
+    assert calls[0]["headers"]["Authorization"] == "Bearer primary-key"
+    assert calls[0]["json"]["from"] == "primary@manifestbank.app"
+    assert calls[1]["headers"]["Authorization"] == "Bearer fallback-key"
+    assert calls[1]["json"]["from"] == "backup@manifestbank.app"
+
+
+def test_send_email_skips_primary_when_daily_cap_reached(monkeypatch):
+    email_module = importlib.reload(email_service)
+    email_module._account_daily_counters.clear()
+    monkeypatch.setattr(email_module.settings, "RESEND_API_KEY", "primary-key")
+    monkeypatch.setattr(email_module.settings, "RESEND_FROM_EMAIL", "primary@manifestbank.app")
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_API_KEY", "fallback-key")
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_FROM_EMAIL", "backup@manifestbank.app")
+    monkeypatch.setattr(email_module.settings, "RESEND_PRIMARY_DAILY_LIMIT", 1)
+    monkeypatch.setattr(email_module.settings, "RESEND_PRIMARY_DAILY_BUFFER", 0)
+    email_module._account_daily_counters["primary"] = {"date": "9999-12-31", "count": 1}
+
+    calls = []
+
+    def fake_post(url: str, headers: dict, json: dict, timeout: int):
+        calls.append({"headers": headers, "json": json})
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(email_module.httpx, "post", fake_post)
+    monkeypatch.setattr(email_module, "datetime", _FrozenDateTime)
+
+    assert email_module._send_email("member@test.com", "Subject", "<p>Hello</p>") is True
+    assert len(calls) == 1
+    assert calls[0]["headers"]["Authorization"] == "Bearer fallback-key"
+    assert calls[0]["json"]["from"] == "backup@manifestbank.app"
+
+
+def test_send_email_uses_numbered_accounts_in_order(monkeypatch):
+    email_module = importlib.reload(email_service)
+    email_module._account_daily_counters.clear()
+    monkeypatch.setattr(email_module.settings, "RESEND_API_KEY", None)
+    monkeypatch.setattr(email_module.settings, "RESEND_FROM_EMAIL", None)
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_API_KEY", None)
+    monkeypatch.setattr(email_module.settings, "RESEND_FALLBACK_FROM_EMAIL", None)
+    monkeypatch.setenv("RESEND_ACCOUNT_1_API_KEY", "account-one-key")
+    monkeypatch.setenv("RESEND_ACCOUNT_1_FROM_EMAIL", "one@manifestbank.app")
+    monkeypatch.setenv("RESEND_ACCOUNT_2_API_KEY", "account-two-key")
+    monkeypatch.setenv("RESEND_ACCOUNT_2_FROM_EMAIL", "two@manifestbank.app")
+
+    calls = []
+
+    def fake_post(url: str, headers: dict, json: dict, timeout: int):
+        calls.append({"headers": headers, "json": json})
+        if len(calls) == 1:
+            request = httpx.Request("POST", url)
+            response = httpx.Response(429, request=request)
+            raise httpx.HTTPStatusError("first account throttled", request=request, response=response)
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(email_module.httpx, "post", fake_post)
+
+    assert email_module._send_email("member@test.com", "Subject", "<p>Hello</p>") is True
+    assert len(calls) == 2
+    assert calls[0]["headers"]["Authorization"] == "Bearer account-one-key"
+    assert calls[0]["json"]["from"] == "one@manifestbank.app"
+    assert calls[1]["headers"]["Authorization"] == "Bearer account-two-key"
+    assert calls[1]["json"]["from"] == "two@manifestbank.app"
+
+
+class _FrozenDateTime:
+    @classmethod
+    def now(cls, tz=None):
+        return datetime.fromisoformat("9999-12-31T12:00:00+00:00")

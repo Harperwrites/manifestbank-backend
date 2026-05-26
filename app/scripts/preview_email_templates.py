@@ -34,6 +34,9 @@ def main() -> None:
     email_service.send_password_reset_email("member@example.com", "preview-reset-token")
     email_service.send_trial_grant_email("member@example.com", "Nova", 14)
     email_service.send_signature_welcome_email("member@example.com", "Nova")
+    email_service.send_signature_presence_email("member@example.com")
+    email_service.send_signature_recognition_email("member@example.com")
+    email_service.send_signature_promo_email("member@example.com")
     email_service.send_myline_message_email(
         "member@example.com",
         "Fortune",

@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, UTC
 from html import escape
 import logging
+import os
+import re
 import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-_primary_daily_date = None
-_primary_daily_count = 0
+_ACCOUNT_ENV_RE = re.compile(r"^RESEND_ACCOUNT_(\d+)_API_KEY$")
+_account_daily_counters: dict[str, dict[str, str | int]] = {}
+
+
+@dataclass(frozen=True)
+class ResendAccount:
+    name: str
+    api_key: str
+    from_email: str
+    daily_limit: int | None = None
+    daily_buffer: int = 0
 
 
 def _stamp() -> str:
@@ -110,15 +122,122 @@ def _email_shell(
     """
 
 
+def _append_account(accounts: list[ResendAccount], account: ResendAccount) -> None:
+    if not account.api_key or not account.from_email:
+        return
+    if any(existing.api_key == account.api_key and existing.from_email == account.from_email for existing in accounts):
+        return
+    accounts.append(account)
+
+
+def _configured_resend_accounts() -> list[ResendAccount]:
+    accounts: list[ResendAccount] = []
+
+    _append_account(
+        accounts,
+        ResendAccount(
+            name="primary",
+            api_key=settings.RESEND_API_KEY or "",
+            from_email=settings.RESEND_FROM_EMAIL or "",
+            daily_limit=settings.RESEND_PRIMARY_DAILY_LIMIT,
+            daily_buffer=max(0, settings.RESEND_PRIMARY_DAILY_BUFFER),
+        ),
+    )
+
+    numbered_indices = sorted(
+        {
+            int(match.group(1))
+            for key in os.environ
+            if (match := _ACCOUNT_ENV_RE.match(key))
+        }
+    )
+    for index in numbered_indices:
+        api_key = os.getenv(f"RESEND_ACCOUNT_{index}_API_KEY")
+        from_email = os.getenv(f"RESEND_ACCOUNT_{index}_FROM_EMAIL")
+        if not api_key or not from_email:
+            logger.warning(
+                "Skipping RESEND_ACCOUNT_%s because API key or from email is missing.",
+                index,
+            )
+            continue
+        daily_limit_raw = os.getenv(f"RESEND_ACCOUNT_{index}_DAILY_LIMIT")
+        daily_buffer_raw = os.getenv(f"RESEND_ACCOUNT_{index}_DAILY_BUFFER")
+        try:
+            daily_limit = int(daily_limit_raw) if daily_limit_raw else None
+        except ValueError:
+            logger.warning("Ignoring invalid RESEND_ACCOUNT_%s_DAILY_LIMIT=%r", index, daily_limit_raw)
+            daily_limit = None
+        try:
+            daily_buffer = int(daily_buffer_raw) if daily_buffer_raw else 0
+        except ValueError:
+            logger.warning("Ignoring invalid RESEND_ACCOUNT_%s_DAILY_BUFFER=%r", index, daily_buffer_raw)
+            daily_buffer = 0
+
+        _append_account(
+            accounts,
+            ResendAccount(
+                name=f"account_{index}",
+                api_key=api_key,
+                from_email=from_email,
+                daily_limit=daily_limit,
+                daily_buffer=max(0, daily_buffer),
+            ),
+        )
+
+    _append_account(
+        accounts,
+        ResendAccount(
+            name="fallback",
+            api_key=settings.RESEND_FALLBACK_API_KEY or "",
+            from_email=settings.RESEND_FALLBACK_FROM_EMAIL or "",
+        ),
+    )
+    return accounts
+
+
+def _account_is_available(account: ResendAccount) -> bool:
+    if account.daily_limit is None:
+        return True
+
+    today = datetime.now(UTC).date().isoformat()
+    record = _account_daily_counters.get(account.name)
+    if not record or record["date"] != today:
+        record = {"date": today, "count": 0}
+        _account_daily_counters[account.name] = record
+
+    threshold = max(0, account.daily_limit - max(0, account.daily_buffer))
+    if int(record["count"]) >= threshold:
+        logger.info(
+            "Resend account %s skipped due to daily cap guard (%s/%s, buffer=%s)",
+            account.name,
+            record["count"],
+            account.daily_limit,
+            account.daily_buffer,
+        )
+        return False
+    return True
+
+
+def _mark_account_sent(account: ResendAccount) -> None:
+    if account.daily_limit is None:
+        return
+    today = datetime.now(UTC).date().isoformat()
+    record = _account_daily_counters.get(account.name)
+    if not record or record["date"] != today:
+        record = {"date": today, "count": 0}
+        _account_daily_counters[account.name] = record
+    record["count"] = int(record["count"]) + 1
+
+
 def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = None) -> bool:
-    primary_key = settings.RESEND_API_KEY
-    primary_sender = settings.RESEND_FROM_EMAIL
-    if not primary_key or not primary_sender:
-        logger.error("Resend credentials missing; verify RESEND_API_KEY and RESEND_FROM_EMAIL.")
+    accounts = _configured_resend_accounts()
+    if not accounts:
+        logger.error(
+            "Resend credentials missing; configure RESEND_API_KEY/RESEND_FROM_EMAIL or numbered RESEND_ACCOUNT_n credentials."
+        )
         return False
 
     payload = {
-        "from": primary_sender,
         "to": [to_email],
         "subject": subject,
         "html": html,
@@ -134,54 +253,35 @@ def _send_email(to_email: str, subject: str, html: str, reply_to: str | None = N
             timeout=10,
         )
 
-    # If a primary daily cap is configured, route to fallback before we hit the limit.
-    global _primary_daily_date, _primary_daily_count
-    if settings.RESEND_PRIMARY_DAILY_LIMIT:
-        today = datetime.now(UTC).date().isoformat()
-        if _primary_daily_date != today:
-            _primary_daily_date = today
-            _primary_daily_count = 0
-        buffer = max(0, settings.RESEND_PRIMARY_DAILY_BUFFER)
-        if _primary_daily_count >= max(0, settings.RESEND_PRIMARY_DAILY_LIMIT - buffer):
-            primary_key = None  # skip primary
-            logger.info(
-                "Primary Resend skipped due to daily cap guard (%s/%s, buffer=%s)",
-                _primary_daily_count,
-                settings.RESEND_PRIMARY_DAILY_LIMIT,
-                buffer,
-            )
+    attempted = False
+    for account in accounts:
+        if not _account_is_available(account):
+            continue
 
-    try:
-        if primary_key:
-            res = _post(primary_key, payload)
+        attempted = True
+        account_payload = dict(payload)
+        account_payload["from"] = account.from_email
+        try:
+            res = _post(account.api_key, account_payload)
             res.raise_for_status()
-            _primary_daily_count += 1
-            logger.info("Primary Resend delivered for %s", to_email)
+            _mark_account_sent(account)
+            logger.info("Resend delivered for %s via %s", to_email, account.name)
             return True
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code
-        logger.warning("Primary Resend failed (%s) for %s", status_code, to_email)
-        if status_code not in {429, 500, 502, 503, 504}:
-            logger.exception("Email failed for %s", to_email)
-            return False
-    except Exception:
-        logger.exception("Primary Resend error for %s", to_email)
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "Resend account %s failed (%s) for %s",
+                account.name,
+                exc.response.status_code,
+                to_email,
+            )
+        except Exception:
+            logger.exception("Resend account %s error for %s", account.name, to_email)
 
-    fallback_key = settings.RESEND_FALLBACK_API_KEY
-    fallback_sender = settings.RESEND_FALLBACK_FROM_EMAIL
-    if not fallback_key or not fallback_sender:
-        logger.error("Fallback Resend credentials missing; verify RESEND_FALLBACK_API_KEY and RESEND_FALLBACK_FROM_EMAIL.")
-        return False
-
-    payload["from"] = fallback_sender
-    try:
-        res = _post(fallback_key, payload)
-        res.raise_for_status()
-        logger.info("Fallback Resend delivered for %s", to_email)
-        return True
-    except Exception:
-        logger.exception("Fallback Resend failed for %s", to_email)
-        return False
+    if attempted:
+        logger.error("All configured Resend accounts failed for %s", to_email)
+    else:
+        logger.error("No configured Resend accounts were available for %s", to_email)
+    return False
 
 
 def send_verification_email(to_email: str, token: str) -> bool:
@@ -339,6 +439,60 @@ def send_trial_grant_email(to_email: str, username: str | None, trial_days: int)
     return _send_email(to_email, f"ManifestBank™ Signature — {trial_days} days on us", html)
 
 
+def send_signature_presence_email(to_email: str) -> bool:
+    body_html = f"""
+    <p style="margin:0 0 12px;">Hi there,</p>
+    <p style="margin:0 0 12px;">I wanted to take a moment to reach out personally and say something that truly matters to us…</p>
+    <p style="margin:0 0 12px;"><strong>We see you.</strong></p>
+    <p style="margin:0 0 12px;">We see the intention behind your actions.<br/>We see the way you’re showing up for yourself.<br/>We see the decision you made to step into something greater when you chose Signature.</p>
+    <p style="margin:0 0 12px;">And we don’t take that lightly.</p>
+    <p style="margin:0 0 12px;">ManifestBank™ was never meant to be just another app. It’s a space for alignment, identity, and elevation. And the truth is… that space becomes powerful because of people like you inside of it.</p>
+    {_info_card("<strong>Your presence here means something.</strong>")}
+    <p style="margin:0 0 12px;">It means you’re choosing growth over autopilot.<br/>It means you’re choosing awareness over repetition.<br/>It means you’re choosing to build a relationship with abundance that actually lasts.</p>
+    <p style="margin:0 0 12px;">That’s rare. And we notice it.</p>
+    <p style="margin:0 0 12px;">As a Signature member, you’re not just accessing features… you’re stepping into a higher level of intention, clarity, and control. You’re part of the layer that shapes where this all goes next.</p>
+    <p style="margin:0 0 12px;">And we’re genuinely excited about that.</p>
+    <p style="margin:0 0 12px;">We’re building, evolving, and expanding in real time… and you’re right here with us as it happens.</p>
+    <p style="margin:0 0 12px;">Thank you for being here.<br/>Thank you for choosing this.<br/>And most importantly… thank you for choosing yourself.</p>
+    <p style="margin:0 0 12px;">More is unfolding.</p>
+    <p style="margin:0;">— ManifestBank™ 💎</p>
+    """
+    html = _email_shell(
+        eyebrow="Signature Presence",
+        heading="You’re Not Just Here… You’re Part of This 💫",
+        body_html=body_html,
+        cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/dashboard", "Enter ManifestBank™"),
+        footer_note="ManifestBank™ is a wealth visualization and reflection platform. It is not a financial institution.",
+    )
+    return _send_email(to_email, "You’re Not Just Here… You’re Part of This 💫", html)
+
+
+def send_signature_recognition_email(to_email: str) -> bool:
+    body_html = f"""
+    <p style="margin:0 0 12px;">We’re genuinely sorry for that delay.</p>
+    <p style="margin:0 0 12px;">But we don’t want this to feel like a “late welcome email.”</p>
+    <p style="margin:0 0 12px;">We want this to feel like what it really is: a moment of recognition.</p>
+    <p style="margin:0 0 12px;">Because you weren’t just early…<br/>you were aligned early.</p>
+    <p style="margin:0 0 12px;">You saw something in ManifestBank™ before it fully spoke for itself. You trusted the vision before it was fully built out. That kind of decision? That kind of instinct?</p>
+    {_info_card("That’s exactly the kind of identity this entire platform is designed to strengthen.")}
+    <p style="margin:0 0 12px;">So while this message may be arriving later than intended…<br/>your timing was never late.</p>
+    <p style="margin:0 0 12px;"><strong>It was precise.</strong></p>
+    <p style="margin:0 0 12px;">We’re continuing to refine, expand, and elevate Signature in ways that match the level you stepped into from day one. And everything being built now is being built with you in mind.</p>
+    <p style="margin:0 0 12px;">You’re not catching up to ManifestBank™.<br/>ManifestBank™ is catching up to you.</p>
+    <p style="margin:0 0 12px;">Thank you for being here.</p>
+    <p style="margin:0 0 12px;">Truly.</p>
+    <p style="margin:0;">— The ManifestBank™ Team</p>
+    """
+    html = _email_shell(
+        eyebrow="Signature Recognition",
+        heading="A Personal Thank You",
+        body_html=body_html,
+        cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/dashboard", "Enter ManifestBank™"),
+        footer_note="ManifestBank™ is a wealth visualization and reflection platform. It is not a financial institution.",
+    )
+    return _send_email(to_email, "A Personal Thank You — And Something We Owe You", html)
+
+
 def send_myline_message_email(
     to_email: str,
     sender_name: str,
@@ -441,4 +595,38 @@ def send_signature_account_fix_email(
         """,
     )
     subject = "ManifestBank™ Update — Issue Resolved & Thank You for Your Support"
+    return _send_email(to_email, subject, html)
+
+
+def send_signature_promo_email(to_email: str) -> bool:
+    html = _email_shell(
+        eyebrow="Signature Offer",
+        heading="50% Off Signature Annual Membership Ends June 1 at Midnight CST",
+        body_html=f"""
+        <p style="margin:0 0 12px;">Dear ManifestBank™ Members,</p>
+        <p style="margin:0 0 12px;">Something special has arrived ✨</p>
+        <p style="margin:0 0 12px;">For a limited time, annual ManifestBank™ Signature memberships are now <strong>50% OFF</strong> through June 1st at 11:59 PM CST.</p>
+        <p style="margin:0 0 12px;">That means full Signature access for just <strong>$36/year</strong> using code:</p>
+        {_info_card("<strong style='font-size:20px;letter-spacing:0.08em;'>SIGNATURE50</strong>")}
+        <p style="margin:0 0 12px;">This is our way of thanking the community that continues to grow, build, visualize, and evolve with us every day.</p>
+        <p style="margin:0 0 12px;">Signature members unlock a deeper ManifestBank™ experience, including:</p>
+        <ul style="margin:0 0 16px 18px;padding:0;">
+          <li>Unlimited balance visibility</li>
+          <li>Advanced dashboard experiences</li>
+          <li>Premium manifestation tools &amp; features</li>
+          <li>Future Signature-exclusive releases</li>
+          <li>Enhanced customization and wealth visualization experiences</li>
+          <li>Priority access to upcoming platform expansions</li>
+        </ul>
+        <p style="margin:0 0 12px;">At the same time, we are officially introducing <strong>Balance Preview Vault™ 🗝️</strong> for non-Signature accounts.</p>
+        <p style="margin:0 0 12px;">Beginning now, balances shown on free memberships will automatically lock after a preview period. Locked balances can still exist safely within your account, but ongoing visibility is now reserved for Signature members.</p>
+        <p style="margin:0 0 12px;">This shift helps us continue building a more powerful premium experience while keeping ManifestBank™ sustainable, intentional, and continuously evolving.</p>
+        <p style="margin:0 0 12px;">If you’ve been thinking about joining Signature, this is the lowest annual price currently planned.</p>
+        {_info_card("Use code <strong>SIGNATURE50</strong> before:<br/><strong>June 1st • 11:59 PM CST</strong>")}
+        <p style="margin:0 0 12px;">Thank you for being part of this journey with us.</p>
+        <p style="margin:0;">With appreciation,<br/>The ManifestBank™ Team</p>
+        """,
+        cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/dashboard", "Unlock ManifestBank™ Signature"),
+    )
+    subject = "50% Off Signature Annual Membership Ends June 1 at Midnight CST"
     return _send_email(to_email, subject, html)

@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.ledger import LedgerEntry
-from app.crud.crud_ledger import get_account_balance
+from app.crud.crud_ledger import get_account_balance, get_latest_posted_balance_timestamp
+from app.services.tier import build_preview_access
 from app.services.fx import convert_amount_with_rate_snapshot, get_rates_snapshot
 
 
@@ -82,13 +83,14 @@ def _pending_total_base(
 
 def build_dashboard_aggregate(
     db: Session,
-    user_id: int,
+    user,
     display_currency: str,
     previous_base_total: Decimal | None = None,
 ) -> dict:
     display_cur = (display_currency or BASE_CURRENCY).upper()
     base_cur = BASE_CURRENCY
     fx_timestamp = datetime.now(UTC).isoformat()
+    user_id = user.id
 
     rates = get_rates_snapshot()
     accounts = (
@@ -111,14 +113,18 @@ def build_dashboard_aggregate(
     for acct in accounts:
         native_currency = (acct.currency or base_cur).upper()
         native_balance = get_account_balance(db, acct.id, currency=native_currency)
+        latest_posted_at = get_latest_posted_balance_timestamp(db, acct.id)
+        preview = build_preview_access(user=user, created_at=latest_posted_at)
+        visible_to_user = bool(preview.get("visible_to_user", True))
+        preview_balance = native_balance if visible_to_user else Decimal("0")
         if native_currency == display_cur:
-            selected_subtotal += native_balance
+            selected_subtotal += preview_balance
 
         converted_display, missing_display, rate_display = convert_amount_with_rate_snapshot(
-            native_balance, native_currency, display_cur, rates
+            preview_balance, native_currency, display_cur, rates
         )
         converted_base, missing_base, rate_base = convert_amount_with_rate_snapshot(
-            native_balance, native_currency, base_cur, rates
+            preview_balance, native_currency, base_cur, rates
         )
         if rate_display <= 0 or rate_base <= 0:
             errors.append(f"Invalid FX rate for {native_currency}.")
@@ -135,7 +141,8 @@ def build_dashboard_aggregate(
             {
                 "account_id": acct.id,
                 "account_name": acct.name,
-                "native_balance": str(native_balance),
+                "native_balance": str(preview_balance),
+                "stored_native_balance": str(native_balance),
                 "native_currency": native_currency,
                 "display_currency": display_cur,
                 "conversion_rate": str(rate_display),
@@ -143,6 +150,9 @@ def build_dashboard_aggregate(
                 "converted_amount": str(converted_display),
                 "converted_base_amount": str(converted_base),
                 "fx_timestamp": fx_timestamp,
+                "visible_to_user": visible_to_user,
+                "preview_expires_at": preview.get("preview_expires_at"),
+                "is_preview_expired": bool(preview.get("is_preview_expired")),
             }
         )
 

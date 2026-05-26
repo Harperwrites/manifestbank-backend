@@ -56,7 +56,7 @@ def dashboard_aggregate(
             previous = Decimal(str(prev_base_total))
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid prev_base_total")
-    data = build_dashboard_aggregate(db, current_user.id, display_currency, previous)
+    data = build_dashboard_aggregate(db, current_user, display_currency, previous)
     if not data["validation"]["valid"]:
         logger.error("Dashboard aggregate validation failed: %s", data["validation"]["errors"])
     if strict and not data["validation"]["valid"]:

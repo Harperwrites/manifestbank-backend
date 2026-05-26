@@ -10,8 +10,7 @@ from app.schemas.ledger import LedgerEntryCreate, LedgerEntryRead, BalanceRead, 
 from app.crud.crud_ledger import (
     create_ledger_entry,
     list_ledger_entries,
-    get_account_balance,
-    get_latest_posted_balance_timestamp,
+    get_account_preview_balance_data,
     create_transfer,
 )
 from app.services.fx import convert_amount_with_rate
@@ -156,15 +155,15 @@ def get_balance(
     if (acct.owner_user_id != current_user.id) and (not is_admin(current_user)):
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    bal = get_account_balance(db, account_id, currency=currency)
-    latest_posted_at = get_latest_posted_balance_timestamp(db, account_id)
-    preview = build_preview_access(user=current_user, created_at=latest_posted_at)
+    preview_balance = get_account_preview_balance_data(db, current_user, account_id, currency=currency)
     return BalanceRead(
         account_id=account_id,
         currency=currency,
-        balance=bal,
+        balance=preview_balance["balance"],
         as_of=datetime.now(UTC),
-        **preview,
+        preview_expires_at=preview_balance["preview_expires_at"],
+        is_preview_expired=bool(preview_balance["is_preview_expired"]),
+        visible_to_user=bool(preview_balance["visible_to_user"]),
     )
 
 

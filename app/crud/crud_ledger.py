@@ -9,6 +9,7 @@ from app.models.ledger import LedgerEntry
 from app.models.account import Account
 from app.schemas.ledger import LedgerEntryCreate
 from app.services.fx import convert_amount
+from app.services.tier import build_preview_access, is_premium
 
 
 def create_ledger_entry(db: Session, created_by_user_id: int, payload: LedgerEntryCreate) -> LedgerEntry:
@@ -97,6 +98,61 @@ def get_latest_posted_balance_timestamp(db: Session, account_id: int) -> datetim
         .filter(LedgerEntry.account_id.in_(account_ids), LedgerEntry.status == "posted")
         .scalar()
     )
+
+
+def get_account_preview_balance_data(db: Session, user, account_id: int, currency: str = "USD") -> dict[str, object]:
+    account_ids = get_balance_account_ids(db, account_id)
+    entries = (
+        db.query(LedgerEntry)
+        .filter(LedgerEntry.account_id.in_(account_ids), LedgerEntry.status == "posted")
+        .order_by(LedgerEntry.created_at.desc(), LedgerEntry.id.desc())
+        .all()
+    )
+
+    stored_total = Decimal("0")
+    preview_total = Decimal("0")
+    visible_expires_at: datetime | None = None
+    locked_expires_at: datetime | None = None
+
+    for entry in entries:
+        amount = Decimal(str(entry.amount or 0))
+        converted = convert_amount(amount, entry.currency or currency, currency)
+        signed = converted if entry.direction == "credit" else -converted
+        stored_total += signed
+
+        preview = build_preview_access(user=user, created_at=entry.created_at)
+        expires_at = preview.get("preview_expires_at")
+        if preview.get("visible_to_user", True):
+            preview_total += signed
+            if isinstance(expires_at, datetime):
+                if visible_expires_at is None or expires_at < visible_expires_at:
+                    visible_expires_at = expires_at
+        elif isinstance(expires_at, datetime):
+            if locked_expires_at is None or expires_at > locked_expires_at:
+                locked_expires_at = expires_at
+
+    if is_premium(user):
+        return {
+            "balance": stored_total,
+            "preview_expires_at": visible_expires_at or locked_expires_at,
+            "is_preview_expired": False,
+            "visible_to_user": True,
+        }
+
+    if visible_expires_at is not None:
+        return {
+            "balance": preview_total,
+            "preview_expires_at": visible_expires_at,
+            "is_preview_expired": False,
+            "visible_to_user": True,
+        }
+
+    return {
+        "balance": Decimal("0"),
+        "preview_expires_at": locked_expires_at,
+        "is_preview_expired": bool(entries),
+        "visible_to_user": False if entries else True,
+    }
 
 
 def create_transfer(

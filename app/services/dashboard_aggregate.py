@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.ledger import LedgerEntry
-from app.crud.crud_ledger import get_account_balance, get_latest_posted_balance_timestamp
-from app.services.tier import build_preview_access
+from app.crud.crud_ledger import get_account_balance, get_account_preview_balance_data
 from app.services.fx import convert_amount_with_rate_snapshot, get_rates_snapshot
 
 
@@ -113,10 +112,9 @@ def build_dashboard_aggregate(
     for acct in accounts:
         native_currency = (acct.currency or base_cur).upper()
         native_balance = get_account_balance(db, acct.id, currency=native_currency)
-        latest_posted_at = get_latest_posted_balance_timestamp(db, acct.id)
-        preview = build_preview_access(user=user, created_at=latest_posted_at)
-        visible_to_user = bool(preview.get("visible_to_user", True))
-        preview_balance = native_balance if visible_to_user else Decimal("0")
+        preview = get_account_preview_balance_data(db, user, acct.id, currency=native_currency)
+        visible_to_user = bool(preview["visible_to_user"])
+        preview_balance = Decimal(str(preview["balance"]))
         if native_currency == display_cur:
             selected_subtotal += preview_balance
 
@@ -151,8 +149,8 @@ def build_dashboard_aggregate(
                 "converted_base_amount": str(converted_base),
                 "fx_timestamp": fx_timestamp,
                 "visible_to_user": visible_to_user,
-                "preview_expires_at": preview.get("preview_expires_at"),
-                "is_preview_expired": bool(preview.get("is_preview_expired")),
+                "preview_expires_at": preview["preview_expires_at"],
+                "is_preview_expired": bool(preview["is_preview_expired"]),
             }
         )
 

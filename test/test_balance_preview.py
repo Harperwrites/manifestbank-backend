@@ -145,7 +145,7 @@ async def test_free_users_receive_locked_preview_for_old_balances_without_mutati
     body = balance.json()
     assert body["visible_to_user"] is False
     assert body["is_preview_expired"] is True
-    assert Decimal(str(body["balance"])) == Decimal("250.00")
+    assert Decimal(str(body["balance"])) == Decimal("0.00")
 
     ledger_body = ledger.json()
     assert ledger_body[0]["visible_to_user"] is False
@@ -248,3 +248,128 @@ async def test_existing_free_user_balances_get_preview_window_from_rollout(clien
     assert preview["visible_to_user"] is True
     assert preview["is_preview_expired"] is False
     assert preview["preview_expires_at"] == datetime(2026, 5, 26, 6, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_free_user_balance_only_counts_currently_visible_entries(client, auth_helper, db):
+    login = await auth_helper(client, "previewmixed@test.com", "123456", "previewmixed", premium=True, verified=True)
+    token = login.json()["access_token"]
+    headers = _auth_headers(token)
+
+    account = await client.post(
+        "/accounts",
+        json={"name": "Mixed Preview", "account_type": "personal", "currency": "USD"},
+        headers=headers,
+    )
+    account_id = account.json()["id"]
+
+    await client.post(
+        "/ledger/entries",
+        json={
+            "account_id": account_id,
+            "direction": "credit",
+            "amount": "999.00",
+            "currency": "USD",
+            "entry_type": "welcome",
+            "status": "posted",
+        },
+        headers=headers,
+    )
+    await client.post(
+        "/ledger/entries",
+        json={
+            "account_id": account_id,
+            "direction": "credit",
+            "amount": "100.00",
+            "currency": "USD",
+            "entry_type": "deposit",
+            "status": "posted",
+        },
+        headers=headers,
+    )
+
+    user = db.query(User).filter(User.email == "previewmixed@test.com").first()
+    user.is_premium = False
+    db.add(user)
+    db.commit()
+
+    entries = (
+        db.query(LedgerEntry)
+        .filter(LedgerEntry.account_id == account_id)
+        .order_by(LedgerEntry.id.asc())
+        .all()
+    )
+    entries[0].created_at = datetime.now(UTC) - timedelta(days=1)
+    entries[1].created_at = datetime.now(UTC) - timedelta(minutes=30)
+    db.add_all(entries)
+    db.commit()
+
+    balance = await client.get(f"/accounts/{account_id}/balance?currency=USD", headers=headers)
+
+    assert balance.status_code == 200
+    body = balance.json()
+    assert body["visible_to_user"] is True
+    assert body["is_preview_expired"] is False
+    assert Decimal(str(body["balance"])) == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_aggregate_excludes_locked_balances_for_free_users(client, auth_helper, db):
+    login = await auth_helper(client, "previewaggregate@test.com", "123456", "previewaggregate", premium=True, verified=True)
+    token = login.json()["access_token"]
+    headers = _auth_headers(token)
+
+    account = await client.post(
+        "/accounts",
+        json={"name": "Aggregate Preview", "account_type": "personal", "currency": "USD"},
+        headers=headers,
+    )
+    account_id = account.json()["id"]
+
+    await client.post(
+        "/ledger/entries",
+        json={
+            "account_id": account_id,
+            "direction": "credit",
+            "amount": "999.00",
+            "currency": "USD",
+            "entry_type": "welcome",
+            "status": "posted",
+        },
+        headers=headers,
+    )
+    await client.post(
+        "/ledger/entries",
+        json={
+            "account_id": account_id,
+            "direction": "credit",
+            "amount": "100.00",
+            "currency": "USD",
+            "entry_type": "deposit",
+            "status": "posted",
+        },
+        headers=headers,
+    )
+
+    user = db.query(User).filter(User.email == "previewaggregate@test.com").first()
+    user.is_premium = False
+    db.add(user)
+    db.commit()
+
+    entries = (
+        db.query(LedgerEntry)
+        .filter(LedgerEntry.account_id == account_id)
+        .order_by(LedgerEntry.id.asc())
+        .all()
+    )
+    entries[0].created_at = datetime.now(UTC) - timedelta(days=1)
+    entries[1].created_at = datetime.now(UTC) - timedelta(minutes=15)
+    db.add_all(entries)
+    db.commit()
+
+    aggregate = await client.get("/dashboard/aggregate?currency=USD", headers=headers)
+
+    assert aggregate.status_code == 200
+    body = aggregate.json()
+    assert Decimal(str(body["aggregate_total"])) == Decimal("100.00")
+    assert Decimal(str(body["selected_currency_subtotal"])) == Decimal("100.00")

@@ -630,3 +630,32 @@ def send_signature_promo_email(to_email: str) -> bool:
     )
     subject = "50% Off Signature Annual Membership Ends June 1 at Midnight CST"
     return _send_email(to_email, subject, html)
+
+
+def render_annual_membership_reply_email(recipient_name: str = "Annie") -> tuple[str, str]:
+    subject = "Re: Annual Membership"
+    html = _email_shell(
+        eyebrow="Annual Membership",
+        heading=subject,
+        body_html=f"""
+        <p style="margin:0 0 12px;">Hi {escape(recipient_name)},</p>
+        <p style="margin:0 0 12px;">Thank you so much for joining ManifestBank™ Signature as an annual member, and thank you for bringing this to my attention.</p>
+        <p style="margin:0 0 12px;">I’m following up in response to your note about the SIGNATURE50 annual checkout issue.</p>
+        <p style="margin:0 0 12px;">I sincerely apologize for the inconvenience with the SIGNATURE50 code not applying properly during checkout. I completely understand your concern.</p>
+        <p style="margin:0 0 12px;">I’ll be happy to make this right by refunding the difference for the 50% promotional amount associated with the annual membership. You should receive the partial refund back to your original payment method once it has been processed.</p>
+        <p style="margin:0 0 12px;">Thank you again for your support and for becoming part of the Signature experience. I truly appreciate your patience and kindness while we get this resolved for you.</p>
+        <p style="margin:0;">Warmly,<br/>Brea Harper<br/>ManifestBank™</p>
+        """,
+        footer_note="ManifestBank™ is a wealth visualization and reflection platform. It is not a financial institution.",
+    )
+    return subject, html
+
+
+def send_annual_membership_reply_email(
+    to_email: str,
+    *,
+    recipient_name: str = "Annie",
+    reply_to: str | None = None,
+) -> bool:
+    subject, html = render_annual_membership_reply_email(recipient_name=recipient_name)
+    return _send_email(to_email, subject, html, reply_to=reply_to)

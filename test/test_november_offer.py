@@ -48,7 +48,7 @@ def test_new_signups_wait_for_second_real_login(campaign_db, monkeypatch):
     offer.record_login(db,new.id)
     result = offer.offer_status(db,new)
     assert result['show_alert'] is True
-    assert result['delay_ms'] == 4000
+    assert result['delay_ms'] == 0
     assert result['first_year_cents'] == 2222
     old = member(db, 'existing')
     offer.record_login(db, old.id)
@@ -297,3 +297,36 @@ def test_deleted_stripe_reference_does_not_block_free_account(campaign_db,monkey
     monkeypatch.setattr(offer.stripe.Subscription,'list',missing)
     monkeypatch.setattr(offer.stripe.Subscription,'retrieve',missing)
     assert offer.eligible(campaign_db,user,live=True)
+
+
+def test_blast_limit_selects_oldest_eligible_accounts_and_never_backfills(campaign_db,monkeypatch):
+    from app.scripts import send_november_offer as sender
+    db=campaign_db
+    oldest=member(db,'oldest')
+    current=member(db,'already-signature');current.is_premium=True;db.commit()
+    second=member(db,'second-oldest')
+    later=member(db,'later')
+    monkeypatch.setattr(sender,'SessionLocal',lambda:db)
+    monkeypatch.setattr(sender,'active',lambda:True)
+    monkeypatch.setattr(sender,'eligible',lambda db,u,live=False:not u.is_premium)
+    monkeypatch.setattr(sender.settings,'STRIPE_SECRET_KEY','test')
+    monkeypatch.setattr(sender.settings,'STRIPE_PRICE_ANNUAL','annual')
+    monkeypatch.setattr(sender.settings,'STRIPE_NOVEMBER_COUPON_ID','coupon')
+    monkeypatch.setattr(sender.settings,'FRONTEND_BASE_URL','https://manifestbank.app')
+    monkeypatch.setattr(sender.settings,'BACKEND_BASE_URL','https://api.manifestbank.app')
+    monkeypatch.setattr(sender,'_configured_resend_accounts',lambda:[object()])
+    monkeypatch.setattr(sender,'checkout_discount',lambda *args:None)
+    monkeypatch.setattr(sender.time,'sleep',lambda *args:None)
+    plan=sender.run(limit=2)
+    assert plan['selected_user_ids']==[oldest.id,second.id]
+    calls=[]
+    def deliver(email,*args):
+        calls.append(email)
+        return 'failed' if email==oldest.email else 'sent'
+    monkeypatch.setattr(sender,'send_november_offer_email',deliver)
+    result=sender.run(send=True,limit=2,user_ids=plan['selected_user_ids'])
+    assert calls==[oldest.email,second.email]
+    assert result['attempted']==2 and result['sent']==1 and result['failed']==1
+    assert later.email not in calls
+    sender.run(send=True,limit=2,user_ids=plan['selected_user_ids'])
+    assert calls==[oldest.email,second.email]

@@ -128,7 +128,7 @@ def offer_status(db, user):
             "show_alert": allowed and second_login,
             "login_number": state.login_count if state else 0,
             "login_at": state.last_login_at.isoformat() if state and state.last_login_at else None,
-            "delay_ms": 4000, "first_year_cents": FIRST_YEAR_CENTS, "promo_code": PROMO_CODE,
+            "delay_ms": 0, "first_year_cents": FIRST_YEAR_CENTS, "promo_code": PROMO_CODE,
             "regular_annual_cents": REGULAR_CENTS, "ends_at": END.isoformat(),
             "end_label": END_LABEL, "renewal_copy": RENEWAL_COPY,
             "checkout_ready": bool(settings.STRIPE_SECRET_KEY and settings.STRIPE_PRICE_ANNUAL and settings.STRIPE_NOVEMBER_COUPON_ID)}

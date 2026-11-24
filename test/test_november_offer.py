@@ -330,3 +330,13 @@ def test_blast_limit_selects_oldest_eligible_accounts_and_never_backfills(campai
     assert later.email not in calls
     sender.run(send=True,limit=2,user_ids=plan['selected_user_ids'])
     assert calls==[oldest.email,second.email]
+
+def test_current_signature_members_never_receive_popup(campaign_db,monkeypatch):
+    monkeypatch.setattr(offer,'active',lambda:True)
+    monkeypatch.setattr(offer.settings,'STRIPE_SECRET_KEY',None)
+    monthly=member(campaign_db,'popup-monthly',stripe_status='active',stripe_subscription_id='sub_monthly_current')
+    annual=member(campaign_db,'popup-annual',stripe_status='trialing',stripe_price_id='price_annual_current')
+    for user in (monthly,annual):
+        state=offer.offer_status(campaign_db,user)
+        assert state['eligible'] is False
+        assert state['show_alert'] is False

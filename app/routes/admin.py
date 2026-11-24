@@ -7,6 +7,9 @@ from app.models.subscriber import EmailSubscriber
 
 router = APIRouter(tags=["admin"])
 
+from app.routes.email_center import router as email_center_router
+router.include_router(email_center_router)
+
 @router.get("/admin/heartbeat")
 def admin_heartbeat(admin=Depends(require_role("admin"))):
     return {"status": "Admin access confirmed"}

@@ -101,7 +101,7 @@ def create_checkout_session(
     # Existing subscribers use the portal; do not open another subscription checkout
     # that could redeem a nonmember-only code via Stripe's free-text code field.
     if plan == "annual" and campaign != CAMPAIGN and november_active() and not november_eligible(db, user, live=True):
-        raise HTTPException(403, "Manage your existing membership in the billing portal. This offer is for nonmembers only.")
+        raise HTTPException(403, "You already have a Signature membership. Manage your subscription in the billing portal.")
     if plan == "annual" and not campaign and november_active() and settings.STRIPE_NOVEMBER_COUPON_ID:
         campaign = CAMPAIGN
     if campaign == CAMPAIGN:

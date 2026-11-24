@@ -28,33 +28,76 @@ def active(now=None):
     return START <= current < END
 
 
+CURRENT_SIGNATURE_STATUSES = {"active", "trialing", "past_due", "unpaid", "paused"}
+ENDED_STATUSES = {"canceled", "incomplete_expired"}
+SIGNATURE_PRODUCT_ID = "prod_U1vppOdg9nyPvS"
+
+
 def local_nonmember(user):
-    # Fail closed for incomplete/stale membership flags and all recorded subscribers.
-    return bool(user and user.is_active and user.role != "admin" and not user.is_premium
-                and not user.stripe_subscription_id and not user.stripe_price_id
-                and (user.stripe_status or "").lower() not in {"active", "trialing", "past_due", "unpaid", "incomplete", "paused"})
+    """Conservative offline fallback; account age and admin role are not membership."""
+    if not user or not user.is_active or user.is_premium:
+        return False
+    status = (user.stripe_status or "").lower()
+    if status in CURRENT_SIGNATURE_STATUSES:
+        return False
+    return status in ENDED_STATUSES or not (user.stripe_subscription_id or user.stripe_price_id)
+
+
+def current_signature_subscription(subscription):
+    if subscription.get("status") not in CURRENT_SIGNATURE_STATUSES:
+        return False
+    if (subscription.get("metadata") or {}).get("tier_name") == "signature":
+        return True
+    known_prices = {value for value in (settings.STRIPE_PRICE_MONTHLY, settings.STRIPE_PRICE_ANNUAL, settings.STRIPE_SIGNATURE_PROMO_PRICE_ID) if value}
+    items = (subscription.get("items") or {}).get("data") or []
+    if not items:
+        return True  # An unidentifiable current subscription needs review.
+    for item in items:
+        price = item.get("price") or {}
+        if not isinstance(price, dict) or not price.get("product"):
+            return True
+        product = price["product"]
+        product_id = product.get("id") if isinstance(product, dict) else product
+        if price.get("id") in known_prices or product_id == SIGNATURE_PRODUCT_ID:
+            return True
+    return False
 
 
 def eligible(db: Session, user, *, live=False):
-    if not local_nonmember(user):
+    if not user or not user.is_active or user.is_premium:
         return False
     same_email = db.query(User).filter(func.lower(User.email) == user.email.strip().lower()).all()
-    if any(not local_nonmember(other) for other in same_email):
+    if any(other.is_premium for other in same_email):
         return False
-    if live:
-        if not settings.STRIPE_SECRET_KEY:
-            # Without Stripe access a known customer cannot safely be called a nonmember.
-            return not any(other.stripe_customer_id for other in same_email)
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-        # Find customers by email as well, catching missing local customer/subscription IDs.
-        customers = {other.stripe_customer_id for other in same_email if other.stripe_customer_id}
-        for address in {user.email.strip(), user.email.strip().lower()}:
-            for customer in stripe.Customer.list(email=address, limit=100).auto_paging_iter():
-                customers.add(customer.id)
-        for customer_id in customers:
-            for subscription in stripe.Subscription.list(customer=customer_id, status="all", limit=100).auto_paging_iter():
-                if subscription.get("status") not in {"canceled", "incomplete_expired"}:
+    if not live or not settings.STRIPE_SECRET_KEY:
+        return all(local_nonmember(other) for other in same_email) and (
+            not live or not any(other.stripe_customer_id for other in same_email))
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    # Live billing is authoritative for old canceled subscriptions and stale IDs.
+    customers = {other.stripe_customer_id for other in same_email if other.stripe_customer_id}
+    for address in {user.email.strip(), user.email.strip().lower()}:
+        for customer in stripe.Customer.list(email=address, limit=100).auto_paging_iter():
+            customers.add(customer.id)
+    seen_subscriptions = set()
+    for customer_id in customers:
+        try:
+            subscriptions = stripe.Subscription.list(customer=customer_id, status="all", limit=100)
+            for sub in subscriptions.auto_paging_iter():
+                if sub.get("id"):
+                    seen_subscriptions.add(sub["id"])
+                if current_signature_subscription(sub):
                     return False
+        except stripe.InvalidRequestError as error:
+            if error.code != "resource_missing":
+                raise
+            # A deleted historical customer reference is not a current membership.
+    for subscription_id in {other.stripe_subscription_id for other in same_email if other.stripe_subscription_id} - seen_subscriptions:
+        try:
+            if current_signature_subscription(stripe.Subscription.retrieve(subscription_id)):
+                return False
+        except stripe.InvalidRequestError as error:
+            if error.code != "resource_missing":
+                raise
     return True
 
 
@@ -95,7 +138,7 @@ def checkout_discount(db, user):
     if not active():
         raise HTTPException(410, "This November offer has ended.")
     if not eligible(db, user, live=True):
-        raise HTTPException(403, "This offer is only for nonmembers. Existing subscribers are excluded.")
+        raise HTTPException(403, "This offer is available to people without a current Signature membership. Existing Signature subscribers are excluded.")
     if not settings.STRIPE_NOVEMBER_COUPON_ID or not settings.STRIPE_PRICE_ANNUAL:
         raise HTTPException(503, "The November offer checkout is not configured yet. Please try again later.")
     price = stripe.Price.retrieve(settings.STRIPE_PRICE_ANNUAL)

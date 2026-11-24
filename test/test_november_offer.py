@@ -63,7 +63,7 @@ def test_monthly_annual_and_stale_subscribers_are_all_excluded(campaign_db):
     free.is_premium = True
     assert not offer.local_nonmember(free)
     free.is_premium=False; free.role='admin'
-    assert not offer.local_nonmember(free)
+    assert offer.local_nonmember(free)
 
 
 def test_duplicate_email_and_live_stripe_membership_fail_closed(campaign_db,monkeypatch):
@@ -170,6 +170,7 @@ def test_email_dispatch_excludes_subscribers_optouts_and_duplicates(campaign_db,
     monkeypatch.setattr(sender.settings,'BACKEND_BASE_URL','https://api.example.com')
     monkeypatch.setattr(sender,'_configured_resend_accounts',lambda:[object()])
     monkeypatch.setattr(offer.stripe.Customer,'list',lambda **kw: SimpleNamespace(auto_paging_iter=lambda:iter([])))
+    monkeypatch.setattr(offer.stripe.Subscription,'retrieve',lambda sid:{'id':sid,'status':'active','metadata':{'tier_name':'signature'}})
     monkeypatch.setattr(sender,'checkout_discount',lambda *args:None)
     sent=[]
     monkeypatch.setattr(sender,'send_november_offer_email',lambda email,url,id: sent.append(email) or 'sent')
@@ -239,3 +240,60 @@ def test_existing_members_cannot_open_generic_code_enabled_annual_checkout(campa
     for payload in [{'plan':'annual'}, {'plan':'annual','campaign':'arbitrary'}]:
         with pytest.raises(HTTPException) as exc:billing.create_checkout_session(payload,campaign_db,user)
         assert exc.value.status_code == 403
+
+
+def test_canceled_signature_account_with_old_ids_can_buy_again(campaign_db,monkeypatch):
+    user=member(campaign_db,'returning',stripe_customer_id='cus_old',stripe_subscription_id='sub_old',stripe_price_id='price_annual',stripe_status='canceled')
+    assert offer.local_nonmember(user)
+    monkeypatch.setattr(offer.settings,'STRIPE_SECRET_KEY','test-key')
+    monkeypatch.setattr(offer.stripe.Customer,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter([])))
+    subs=[{'id':'sub_old','status':'canceled','items':{'data':[{'price':{'id':'price_annual','product':offer.SIGNATURE_PRODUCT_ID}}]}}]
+    monkeypatch.setattr(offer.stripe.Subscription,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter(subs)))
+    assert offer.eligible(campaign_db,user,live=True)
+    # Stale local current status is reconciled against live Stripe, without editing records.
+    user.stripe_status='active';campaign_db.commit()
+    assert offer.eligible(campaign_db,user,live=True)
+    assert user.stripe_subscription_id=='sub_old'
+    subs[0]['status']='active'
+    assert not offer.eligible(campaign_db,user,live=True)
+
+
+def test_incomplete_first_checkout_and_unrelated_subscription_are_not_signature(campaign_db,monkeypatch):
+    user=member(campaign_db,'firstpurchase',stripe_customer_id='cus_new',stripe_subscription_id='sub_incomplete',stripe_status='incomplete')
+    monkeypatch.setattr(offer.settings,'STRIPE_SECRET_KEY','test-key')
+    monkeypatch.setattr(offer.stripe.Customer,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter([])))
+    subs=[{'id':'sub_incomplete','status':'incomplete'}, {'status':'active','items':{'data':[{'price':{'id':'unrelated','product':'other_product'}}]}}]
+    monkeypatch.setattr(offer.stripe.Subscription,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter(subs)))
+    assert offer.eligible(campaign_db,user,live=True)
+    user.role='admin';campaign_db.commit()
+    assert offer.eligible(campaign_db,user,live=True)
+    user.is_premium=True;campaign_db.commit()
+    assert not offer.eligible(campaign_db,user,live=True)
+
+
+def test_canceled_accounts_are_in_email_audience_but_current_subscribers_are_not(campaign_db,monkeypatch):
+    from app.scripts import send_november_offer as sender
+    db=campaign_db
+    returning=member(db,'returning-email',stripe_customer_id='cus_returning',stripe_subscription_id='sub_ended',stripe_status='canceled')
+    member(db,'current-email',stripe_customer_id='cus_current',stripe_subscription_id='sub_current',stripe_status='active')
+    monkeypatch.setattr(sender,'SessionLocal',lambda:db)
+    monkeypatch.setattr(sender,'active',lambda:True)
+    monkeypatch.setattr(offer.settings,'STRIPE_SECRET_KEY','test-key')
+    monkeypatch.setattr(offer.stripe.Customer,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter([])))
+    def subscriptions(**kw):
+        status='canceled' if kw['customer']=='cus_returning' else 'active'
+        return SimpleNamespace(auto_paging_iter=lambda:iter([{'id':'sub_ended' if status=='canceled' else 'sub_current','status':status,'metadata':{'tier_name':'signature'}}]))
+    monkeypatch.setattr(offer.stripe.Subscription,'list',subscriptions)
+    monkeypatch.setattr(sender,'send_november_offer_email',lambda *args:pytest.fail('Dry run must never send'))
+    result=sender.run()
+    assert result['eligible']==1 and result['excluded']==1 and result['sent']==0
+
+
+def test_deleted_stripe_reference_does_not_block_free_account(campaign_db,monkeypatch):
+    user=member(campaign_db,'deleted-reference',stripe_customer_id='cus_deleted',stripe_subscription_id='sub_deleted',stripe_status='canceled')
+    monkeypatch.setattr(offer.settings,'STRIPE_SECRET_KEY','test-key')
+    monkeypatch.setattr(offer.stripe.Customer,'list',lambda **kw:SimpleNamespace(auto_paging_iter=lambda:iter([])))
+    def missing(*args,**kwargs):raise offer.stripe.InvalidRequestError('No such resource','id',code='resource_missing')
+    monkeypatch.setattr(offer.stripe.Subscription,'list',missing)
+    monkeypatch.setattr(offer.stripe.Subscription,'retrieve',missing)
+    assert offer.eligible(campaign_db,user,live=True)

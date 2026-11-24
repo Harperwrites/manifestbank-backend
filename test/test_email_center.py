@@ -56,10 +56,13 @@ def test_admin_only_and_no_secrets_in_response(center):
     app.dependency_overrides[get_current_user]=lambda:SimpleNamespace(id=center.admin,role='user')
     client=TestClient(app)
     assert client.get('/admin/email-center').status_code==403
+    assert client.get('/admin/email-center/guide').status_code==403
     app.dependency_overrides[get_current_user]=lambda:SimpleNamespace(id=center.admin,role='admin')
     response=client.get('/admin/email-center')
     assert response.status_code==200
     assert center.account.api_key not in response.text
+    guide=client.get('/admin/email-center/guide')
+    assert guide.status_code==200 and guide.content.startswith(b'%PDF')
     assert response.json()['quota']['confirmed'] is False
     assert client.post('/admin/email-center/batches',json={'count':76}).status_code==422
     assert client.post('/admin/email-center/usage',json={'used':0,'utc_day':'2000-01-01'}).status_code==409

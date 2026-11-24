@@ -1,5 +1,6 @@
 """Add durable email center records without changing existing data."""
 from alembic import op
+from app.models.promotion import PromotionEmail  # Register the existing delivery FK target.
 from app.models.email_center import EmailJob, EmailJobRecipient, EmailSenderDay, EmailCenterAudit
 revision='email_center_2026'
 down_revision='november_offer_2026'

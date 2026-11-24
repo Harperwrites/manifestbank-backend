@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.services.email import send_signature_welcome_email, send_subscription_alert_email
+from app.services.november_offer import CAMPAIGN, PROMO_CODE, checkout_discount, active as november_active, eligible as november_eligible
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -91,6 +92,23 @@ def create_checkout_session(
     plan = payload.get("plan") if isinstance(payload, dict) else None
     campaign = payload.get("campaign") if isinstance(payload, dict) else None
     price_id = payload.get("price_id") if isinstance(payload, dict) else None
+    discount = None
+    promo_code = payload.get("promo_code") if isinstance(payload, dict) else None
+    if promo_code:
+        if promo_code != PROMO_CODE:
+            raise HTTPException(400, "Unknown promotional code.")
+        campaign = CAMPAIGN
+    # Existing subscribers use the portal; do not open another subscription checkout
+    # that could redeem a nonmember-only code via Stripe's free-text code field.
+    if plan == "annual" and campaign != CAMPAIGN and november_active() and not november_eligible(db, user, live=True):
+        raise HTTPException(403, "Manage your existing membership in the billing portal. This offer is for nonmembers only.")
+    if plan == "annual" and not campaign and november_active() and settings.STRIPE_NOVEMBER_COUPON_ID:
+        campaign = CAMPAIGN
+    if campaign == CAMPAIGN:
+        if plan != "annual" or price_id:
+            raise HTTPException(400, "The November offer requires the standard annual plan.")
+        discount = checkout_discount(db, user)
+        price_id = settings.STRIPE_PRICE_ANNUAL
     if not price_id:
         price_id = _promo_price_for_campaign(campaign, plan) or _price_for_plan(plan)
 
@@ -117,7 +135,7 @@ def create_checkout_session(
         mode="subscription",
         customer=user.stripe_customer_id,
         line_items=[{"price": price_id, "quantity": 1}],
-        allow_promotion_codes=plan == "annual",
+        **({"discounts": [discount]} if discount else {"allow_promotion_codes": plan == "annual"}),
         success_url=success_url,
         cancel_url=cancel_url,
         client_reference_id=str(user.id),
@@ -127,6 +145,7 @@ def create_checkout_session(
             "tier_name": "signature",
             "plan": plan or "",
             "app_name": "manifestbank",
+            "campaign": campaign or "",
         },
         subscription_data={
             "metadata": {
@@ -134,6 +153,7 @@ def create_checkout_session(
                 "username": user.username or "",
                 "tier_name": "signature",
                 "plan": plan or "",
+                "campaign": campaign or "",
                 "app_name": "manifestbank",
             }
         },

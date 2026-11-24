@@ -664,6 +664,7 @@ def send_annual_membership_reply_email(
 def render_november_offer_email(unsubscribe_url: str) -> tuple[str, str]:
     """Reuse the existing marble, pearl and rose-gold email shell."""
     from app.services.november_offer import END_LABEL, RENEWAL_COPY
+    contact_url = escape(settings.FRONTEND_BASE_URL.rstrip("/") + "/contact", quote=True)
     subject = "Your first year of ManifestBank™ Signature for $22.22"
     html = _email_shell(
         eyebrow="A November invitation · Annual Signature membership",
@@ -690,7 +691,7 @@ def render_november_offer_email(unsubscribe_url: str) -> tuple[str, str]:
         <p style="margin:0;">With appreciation,<br/>The ManifestBank™ Team</p>
         """,
         cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/november-offer", "Explore your $22.22 annual offer"),
-        utility_html=f'<p style="font:12px Arial,sans-serif;line-height:1.6;margin:24px 0 0;"><a href="{escape(unsubscribe_url, quote=True)}">Unsubscribe from promotional emails</a> · <a href="{escape(settings.FRONTEND_BASE_URL.rstrip('/') + "/contact", quote=True)}">Contact ManifestBank</a></p>',
+        utility_html=f'<p style="font:12px Arial,sans-serif;line-height:1.6;margin:24px 0 0;"><a href="{escape(unsubscribe_url, quote=True)}">Unsubscribe from promotional emails</a> · <a href="{contact_url}">Contact ManifestBank</a></p>',
     )
     return subject, html
 

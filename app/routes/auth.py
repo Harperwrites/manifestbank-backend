@@ -70,6 +70,7 @@ from app.services.email import (
 from app.services.moderation import moderate_text, validate_username
 from app.legal.content import TERMS_HASH, PRIVACY_HASH
 from app.services.legal_acceptance import record_legal_acceptances
+from app.services.november_offer import record_signup, record_login
 from app.services.ether_welcome import ensure_welcome_message
 from jose import JWTError, jwt
 
@@ -134,6 +135,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already registered")
     created = create_user(db, user.email, user.password, user.username)
+    record_signup(db, created.id)
     accepted_at = datetime.now(UTC)
     created.terms_accepted_at = accepted_at
     created.privacy_accepted_at = accepted_at
@@ -256,6 +258,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         unique_username = _unique_username(db, base_username)
         random_password = secrets.token_urlsafe(32)
         db_user = create_user(db, email=email, password=random_password, username=unique_username)
+        record_signup(db, db_user.id)
         db_user.terms_accepted_at = None
         db_user.privacy_accepted_at = None
         db_user.terms_version = None
@@ -325,6 +328,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     login_credit_awarded = record_daily_login(db, db_user.id)
     login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
 
+    record_login(db, db_user.id)
     access_token = create_access_token({"sub": str(db_user.id)})
     next_path = state_data.get("next") or "/dashboard"
     keep = "1"
@@ -379,6 +383,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     login_credit_awarded = record_daily_login(db, db_user.id)
     login_credit_points = points_for_action_type("daily_login", is_premium(db_user)) if login_credit_awarded else 0
 
+    record_login(db, db_user.id)
     access_token = create_access_token({"sub": str(db_user.id)})
     refresh_token = create_refresh_token({"sub": str(db_user.id)})
     return {

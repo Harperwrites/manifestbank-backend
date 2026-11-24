@@ -659,3 +659,59 @@ def send_annual_membership_reply_email(
 ) -> bool:
     subject, html = render_annual_membership_reply_email(recipient_name=recipient_name)
     return _send_email(to_email, subject, html, reply_to=reply_to)
+
+
+def render_november_offer_email(unsubscribe_url: str) -> tuple[str, str]:
+    """Reuse the existing marble, pearl and rose-gold email shell."""
+    from app.services.november_offer import END_LABEL, RENEWAL_COPY
+    subject = "Your first year of ManifestBank™ Signature for $22.22"
+    html = _email_shell(
+        eyebrow="A November invitation · Annual Signature membership",
+        heading="A year of possibility. Just $22.22 to begin.",
+        body_html=f"""
+        <p style="margin:0 0 16px;">Hello from ManifestBank™,</p>
+        <p style="margin:0 0 16px;">Give your intentions a little more room to grow. Through the end of November, you’re invited to join <strong>ManifestBank™ Signature</strong> for <strong>$22.22 for your first year</strong>—normally $72 annually.</p>
+        {_info_card('<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8b5147;">Your first year of Signature</div><div style="font-family:Georgia,serif;font-size:48px;line-height:1.2;margin:8px 0;color:#2c1a14;">$22.22 <span style="font:16px Arial,sans-serif;color:#5d4840;"><s>$72</s></span></div><div>One annual membership. More space for your daily practice.</div>')}
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px;border-collapse:collapse;"><tr><td>
+          <a href="{escape(settings.FRONTEND_BASE_URL.rstrip('/') + '/november-offer/video', quote=True)}" style="display:block;text-decoration:none;color:#8b5147;">
+            <img src="{escape(settings.FRONTEND_BASE_URL.rstrip('/') + '/promos/november-2026/november-video-poster.jpg', quote=True)}" width="576" alt="Watch the November promo: $22.22 for your first year of ManifestBank Signature" style="display:block;width:100%;max-width:576px;height:auto;border:0;border-radius:16px;"/>
+            <span style="display:block;padding:12px 0;font-weight:700;text-decoration:underline;">Watch the November promo · 55 seconds</span>
+          </a>
+        </td></tr></table>
+        <p style="margin:0 0 12px;">Make the most of your ManifestBank experience with:</p>
+        <ul style="margin:0 0 20px;padding-left:22px;">
+          <li>Unlimited accounts, manifestation checks, deposits, and expenses.</li>
+          <li>Saved affirmations, statements, and ongoing balance visibility.</li>
+          <li>Access to Fortune, your AI manifestation teller.</li>
+        </ul>
+        <p style="margin:0 0 16px;">Create a practice that fits your life, with tools for reflection, visualization, and consistent action.</p>
+        <p style="margin:0 0 16px;"><strong>Offer ends {escape(END_LABEL)}.</strong> Sign in to view the offer; the discount is applied automatically at checkout.</p>
+        <p style="margin:0 0 16px;font-size:14px;">{escape(RENEWAL_COPY)} Offer available to nonmembers only. Current monthly and annual subscribers are excluded. Taxes, if applicable, are shown at checkout. Manage or cancel your subscription through your account before renewal.</p>
+        <p style="margin:0;">With appreciation,<br/>The ManifestBank™ Team</p>
+        """,
+        cta_html=_button(f"{settings.FRONTEND_BASE_URL.rstrip('/')}/november-offer", "Explore your $22.22 annual offer"),
+        utility_html=f'<p style="font:12px Arial,sans-serif;line-height:1.6;margin:24px 0 0;"><a href="{escape(unsubscribe_url, quote=True)}">Unsubscribe from promotional emails</a> · <a href="{escape(settings.FRONTEND_BASE_URL.rstrip('/') + "/contact", quote=True)}">Contact ManifestBank</a></p>',
+    )
+    return subject, html
+
+
+def send_november_offer_email(to_email: str, unsubscribe_url: str, delivery_id: int) -> str:
+    """One provider per attempt. Ambiguous results are held for review, never retried blindly."""
+    accounts = [account for account in _configured_resend_accounts() if _account_is_available(account)]
+    if not accounts:
+        return "unconfigured"
+    subject, html = render_november_offer_email(unsubscribe_url)
+    account = accounts[0]
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {account.api_key}", "Content-Type":"application/json", "Idempotency-Key": f"november1111-2026-{delivery_id}"},
+            json={"from": account.from_email, "to":[to_email], "subject":subject, "html":html},
+            timeout=20,
+        )
+        if 200 <= response.status_code < 300:
+            _mark_account_sent(account)
+            return "sent"
+        return "failed" if 400 <= response.status_code < 500 else "unknown"
+    except Exception:
+        return "unknown"

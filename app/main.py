@@ -55,6 +55,8 @@ def root():
     return {"status": "ok"}
 
 
+from app.routes.promotions import router as promotions_router
+app.include_router(promotions_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(accounts_router)
 app.include_router(transactions_router)
@@ -110,3 +112,4 @@ def health_check():
         "googleAuthStart": "/auth/google/start",
         "googleAuthCallback": "/auth/google/callback",
     }
+

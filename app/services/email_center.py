@@ -109,6 +109,26 @@ def job_view(db, job):
                 recipients=[dict(user_id=r.user_id, email=r.email, status=r.status) for r in rows])
 
 
+def account_records(db):
+    """Admin-only account inventory; never return credential values from records."""
+    import json
+    allowed = ('email', 'gmail_status', 'resend_status', 'domain', 'domain_id',
+               'domain_status', 'from_email', 'key_name', 'key_permission',
+               'key_status', 'storage', 'campaign_use')
+    records = {}
+    for row in db.query(EmailCenterAudit).filter_by(action='account_record').order_by(EmailCenterAudit.id.desc()):
+        try:
+            value = json.loads(row.detail)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(value, dict) or not isinstance(value.get('email'), str):
+            continue
+        if value['email'] in records:
+            continue
+        records[value['email']] = dict({k: value[k] for k in allowed if isinstance(value.get(k), str)}, recorded_at=row.created_at)
+    return list(records.values())
+
+
 def dashboard(db):
     account = active_sender()
     day = quota(db, account)
@@ -122,9 +142,9 @@ def dashboard(db):
                 senders=[dict(name=a.name, email=a.from_email, selected=a.name == account.name,
                               daily_limit=a.daily_limit, reserve=a.daily_buffer) for a in _configured_resend_accounts()],
                 jobs=[job_view(db, j) for j in db.query(EmailJob).order_by(EmailJob.created_at.desc()).limit(20)],
-                audience=audience_view(db),
+                audience=audience_view(db), account_records=account_records(db),
                 audit=[dict(action=r.action, detail=r.detail, at=r.created_at) for r in
-                       db.query(EmailCenterAudit).order_by(EmailCenterAudit.id.desc()).limit(20)])
+                       db.query(EmailCenterAudit).filter(EmailCenterAudit.action != 'account_record').order_by(EmailCenterAudit.id.desc()).limit(20)])
 
 
 def audience_view(db):

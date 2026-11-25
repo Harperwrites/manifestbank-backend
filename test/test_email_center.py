@@ -49,6 +49,14 @@ def prepare(center,count=3,usage=0):
     return jid
 
 def test_admin_only_and_no_secrets_in_response(center):
+    import json
+    from app.models.email_center import EmailCenterAudit
+    with center.sessions() as db:
+        db.add(EmailCenterAudit(action='account_record',detail=json.dumps({'email':'updates@example.com','domain_status':'pending','api_key':'PRIVATE_OLD_KEY'})))
+        db.commit()
+        db.add(EmailCenterAudit(action='account_record',detail=json.dumps({'email':'updates@example.com','domain_status':'verified','api_key':'PRIVATE_NEW_KEY','password':'PRIVATE_PASSWORD'})))
+        db.add(EmailCenterAudit(action='account_record',detail='invalid json'))
+        db.commit()
     app=FastAPI();app.include_router(router)
     def database():
         with center.sessions() as db:yield db
@@ -61,6 +69,9 @@ def test_admin_only_and_no_secrets_in_response(center):
     response=client.get('/admin/email-center')
     assert response.status_code==200
     assert center.account.api_key not in response.text
+    assert 'PRIVATE_' not in response.text
+    assert len(response.json()['account_records']) == 1
+    assert response.json()['account_records'][0]['domain_status'] == 'verified'
     guide=client.get('/admin/email-center/guide')
     assert guide.status_code==200 and guide.content.startswith(b'%PDF')
     assert response.json()['quota']['confirmed'] is False
